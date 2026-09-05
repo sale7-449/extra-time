@@ -1,0 +1,161 @@
+import type { Match } from "@/lib/types";
+import { teams } from "./teams";
+
+function at(daysFromNow: number, hour: number, minute = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromNow);
+  d.setHours(hour, minute, 0, 0);
+  return d.toISOString();
+}
+
+export const matches: Match[] = [
+  {
+    id: "hilal-nassr-live",
+    competitionId: "roshn",
+    round: "الجولة 12",
+    venue: "استاد الملك فهد الدولي",
+    referee: "محمد الحويش",
+    status: "LIVE",
+    kickoff: at(0, 20, 0),
+    minute: 67,
+    homeTeam: teams.hilal,
+    awayTeam: teams.nassr,
+    homeScore: 2,
+    awayScore: 1,
+    events: [
+      { id: "e1", minute: 12, type: "GOAL", teamId: "hilal", playerName: "سالم الدوسري" },
+      { id: "e2", minute: 34, type: "YELLOW_CARD", teamId: "nassr", playerName: "علي لاجامي" },
+      { id: "e3", minute: 41, type: "GOAL", teamId: "nassr", playerName: "كريستيانو رونالدو", assistName: "ساديو ماني" },
+      { id: "e4", minute: 58, type: "SUBSTITUTION", teamId: "hilal", playerName: "مالكوم", detail: "بدلاً من نيفيز" },
+      { id: "e5", minute: 63, type: "GOAL", teamId: "hilal", playerName: "نيمار جونيور" },
+    ],
+    stats: [
+      { key: "possession", home: 54, away: 46, isPercentage: true },
+      { key: "shots", home: 11, away: 8 },
+      { key: "shotsOnTarget", home: 6, away: 4 },
+      { key: "corners", home: 5, away: 3 },
+      { key: "fouls", home: 9, away: 12 },
+      { key: "offsides", home: 1, away: 2 },
+    ],
+    lineups: {
+      home: {
+        formation: "4-3-3",
+        coach: "خيسوس كاساس",
+        startXI: [
+          { number: 1, name: "بونو", position: "G", grid: "1:1" },
+          { number: 2, name: "سعود عبدالحميد", position: "D", grid: "2:4" },
+          { number: 4, name: "كاليدو كوليبالي", position: "D", grid: "2:3" },
+          { number: 6, name: "روجر إيبانيز", position: "D", grid: "2:2" },
+          { number: 12, name: "ياسر الشهراني", position: "D", grid: "2:1" },
+          { number: 8, name: "روبن نيفيز", position: "M", grid: "3:3" },
+          { number: 17, name: "ميشائيل", position: "M", grid: "3:2" },
+          { number: 25, name: "كاليدو", position: "M", grid: "3:1" },
+          { number: 10, name: "نيمار جونيور", position: "F", grid: "4:3" },
+          { number: 30, name: "عبدالله الحمدان", position: "F", grid: "4:2" },
+          { number: 9, name: "سالم الدوسري", position: "F", grid: "4:1" },
+        ],
+        substitutes: [
+          { number: 22, name: "محمد المقهوي", position: "G" },
+          { number: 23, name: "مالكوم", position: "F" },
+          { number: 27, name: "فراس البريكان", position: "F" },
+        ],
+      },
+      away: {
+        formation: "4-2-3-1",
+        coach: "ستيفانو بيولي",
+        startXI: [
+          { number: 1, name: "ياسين بونو", position: "G", grid: "1:1" },
+          { number: 2, name: "سلطان الغنام", position: "D", grid: "2:4" },
+          { number: 5, name: "علي لاجامي", position: "D", grid: "2:3" },
+          { number: 30, name: "ألكسندر جالينو", position: "D", grid: "2:2" },
+          { number: 13, name: "ياسر الشهراني", position: "D", grid: "2:1" },
+          { number: 8, name: "مارسيلو بروزوفيتش", position: "M", grid: "3:2" },
+          { number: 17, name: "أوتافيو", position: "M", grid: "3:1" },
+          { number: 22, name: "أنغيلو غابرييل", position: "M", grid: "4:3" },
+          { number: 10, name: "ساديو ماني", position: "M", grid: "4:2" },
+          { number: 11, name: "تاليسكا", position: "M", grid: "4:1" },
+          { number: 7, name: "كريستيانو رونالدو", position: "F", grid: "5:1" },
+        ],
+        substitutes: [
+          { number: 20, name: "نواف العقيدي", position: "G" },
+          { number: 19, name: "فابينيو", position: "M" },
+          { number: 90, name: "ابراهيم دياز", position: "F" },
+        ],
+      },
+    },
+  },
+  {
+    id: "ittihad-ahli-today",
+    competitionId: "roshn",
+    round: "الجولة 12",
+    venue: "استاد الملك عبدالله",
+    status: "SCHEDULED",
+    kickoff: at(0, 22, 30),
+    homeTeam: teams.ittihad,
+    awayTeam: teams.ahli,
+    homeScore: null,
+    awayScore: null,
+    events: [],
+    stats: [],
+  },
+  {
+    id: "real-barca-today",
+    competitionId: "la-liga",
+    round: "الكلاسيكو",
+    venue: "سانتياغو برنابيو",
+    status: "SCHEDULED",
+    kickoff: at(0, 23, 0),
+    homeTeam: teams.realMadrid,
+    awayTeam: teams.barcelona,
+    homeScore: null,
+    awayScore: null,
+    events: [],
+    stats: [],
+  },
+  {
+    id: "liverpool-city-tomorrow",
+    competitionId: "premier-league",
+    round: "الجولة 9",
+    venue: "أنفيلد",
+    status: "SCHEDULED",
+    kickoff: at(1, 21, 0),
+    homeTeam: teams.liverpool,
+    awayTeam: teams.manCity,
+    homeScore: null,
+    awayScore: null,
+    events: [],
+    stats: [],
+  },
+  {
+    id: "bayern-psg-week",
+    competitionId: "ucl",
+    round: "دور المجموعات",
+    venue: "أليانز أرينا",
+    status: "SCHEDULED",
+    kickoff: at(3, 22, 0),
+    homeTeam: teams.bayern,
+    awayTeam: teams.psg,
+    homeScore: null,
+    awayScore: null,
+    events: [],
+    stats: [],
+  },
+  {
+    id: "nassr-ahli-yesterday",
+    competitionId: "roshn",
+    round: "الجولة 11",
+    venue: "مرسول بارك",
+    status: "FINISHED",
+    kickoff: at(-1, 20, 0),
+    homeTeam: teams.nassr,
+    awayTeam: teams.ahli,
+    homeScore: 3,
+    awayScore: 1,
+    events: [],
+    stats: [],
+  },
+];
+
+export function getMatchById(id: string): Match | undefined {
+  return matches.find((m) => m.id === id);
+}

@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+/*
+  نظام تصميم EXTRA TIME — داكن أساسي وثابت (ليس متكيفاً مع ثيم الجهاز)،
+  هوية بصرية واحدة مقصودة: كحلي عميق دافئ + أزرق كهربائي حيوي كتمييز أساسي،
+  ومرجاني ناري مخصص لحالة "مباشر" فقط — لا لون واحد يغطي كل شيء.
+  أي تدرج/توهج مشتق من --primary يُبنى عبر color-mix() هنا، فلا حاجة لتكرار
+  قيم الألوان داخل المكوّنات (راجع Hero.tsx وScoreDisplay.tsx).
+*/
+:root {
+  --bg: #0a0e16;
+  --surface: #121826;
+  --surface-2: #1a2233;
+  --border: #232c40;
+  --ink: #f5f7fa;
+  --muted: #8b93a7;
+  --muted-dim: #5b6377;
+  --primary: #2f6fed;
+  --primary-ink: #f8faff;
+  --success: #22c55e;
+  --warning: #f5a623;
+  --error: #ef4444;
+  --live: #ff4757;
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --glow-primary: 0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent),
+    0 0 24px -4px color-mix(in srgb, var(--primary) 45%, transparent);
+  --transition-fast: 150ms ease;
+  --transition-base: 220ms ease;
+}
+
+.container-page {
+  width: 100%;
+  max-width: 1280px;
+  margin-inline: auto;
+  padding-inline: 16px;
+}
+@media (min-width: 768px) {
+  .container-page { padding-inline: 32px; }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-muted-dim: var(--muted-dim);
+  --color-primary: var(--primary);
+  --color-primary-ink: var(--primary-ink);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-live: var(--live);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --font-sans: var(--font-tajawal);
+}
+
+html {
+  color-scheme: dark;
+  overflow-x: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-tajawal), "Segoe UI", sans-serif;
+}
+
+::selection {
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* شريط سكرول رفيع متسق مع الهوية الداكنة */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--surface-2); border-radius: 999px; }
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.animate-live-dot { animation: pulse-live 1.6s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

@@ -1,0 +1,58 @@
+import type { Competition } from "@/lib/types";
+
+export const competitions: Record<string, Competition> = {
+  roshn: {
+    id: "roshn",
+    name: "دوري روشن السعودي",
+    shortName: "روشن",
+    country: "السعودية",
+    logoUrl: null,
+    colorFrom: "#1f6b3a",
+    colorTo: "#0f3320",
+  },
+  premierLeague: {
+    id: "premier-league",
+    name: "الدوري الإنجليزي الممتاز",
+    shortName: "البريميرليج",
+    country: "إنجلترا",
+    logoUrl: null,
+    colorFrom: "#3a1f6b",
+    colorTo: "#1c0f33",
+  },
+  laLiga: {
+    id: "la-liga",
+    name: "الدوري الإسباني",
+    shortName: "لا ليغا",
+    country: "إسبانيا",
+    logoUrl: null,
+    colorFrom: "#6b1f2f",
+    colorTo: "#330f17",
+  },
+  ucl: {
+    id: "ucl",
+    name: "دوري أبطال أوروبا",
+    shortName: "UCL",
+    country: "أوروبا",
+    logoUrl: null,
+    colorFrom: "#1f3d6b",
+    colorTo: "#0f1e33",
+  },
+  acl: {
+    id: "acl",
+    name: "دوري أبطال آسيا",
+    shortName: "ACL",
+    country: "آسيا",
+    logoUrl: null,
+    colorFrom: "#6b5a1f",
+    colorTo: "#332b0f",
+  },
+  bundesliga: {
+    id: "bundesliga",
+    name: "الدوري الألماني",
+    shortName: "البوندسليغا",
+    country: "ألمانيا",
+    logoUrl: null,
+    colorFrom: "#6b1f1f",
+    colorTo: "#330f0f",
+  },
+};
