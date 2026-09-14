@@ -57,7 +57,7 @@ export const messages = {
       viewAll: "عرض الكل",
       notAvailable: "غير متوفر",
       loading: "جارٍ التحميل…",
-      vs: "مقابل",
+      vs: "ضد",
       share: "مشاركة",
       logout: "تسجيل الخروج",
       login: "تسجيل الدخول",
