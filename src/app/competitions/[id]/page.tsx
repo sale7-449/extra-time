@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCompetition, getStandings } from "@/lib/services/competitions.service";
+import { getCompetitionForDetailPage, getStandings } from "@/lib/services/competitions.service";
 import { getUpcomingMatches } from "@/lib/services/matches.service";
 import { canonicalCompetitionId } from "@/lib/providers/football/ids";
 import { MatchCard } from "@/components/shared/MatchCard";
@@ -14,8 +14,9 @@ import { getServerLocale, getMessages } from "@/lib/i18n/getServerLocale";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const [competition, t] = await Promise.all([getCompetition(id), getServerLocale().then(getMessages)]);
-  if (!competition) return { title: `${t.competitions.notFound} — EXTRA TIME` };
+  const [data, t] = await Promise.all([getCompetitionForDetailPage(id), getServerLocale().then(getMessages)]);
+  if (!data) return { title: `${t.competitions.notFound} — EXTRA TIME` };
+  const { competition } = data;
 
   return {
     title: `${competition.name} — EXTRA TIME`,
@@ -27,13 +28,14 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function CompetitionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const t = getMessages(await getServerLocale());
-  const [competition, weekResult, standings] = await Promise.all([
-    getCompetition(id),
+  const [data, weekResult, standings] = await Promise.all([
+    getCompetitionForDetailPage(id),
     getUpcomingMatches("week"),
     getStandings(id),
   ]);
 
-  if (!competition) notFound();
+  if (!data) notFound();
+  const { competition, unavailable } = data;
 
   const canonicalId = canonicalCompetitionId(competition.id);
   const matches = weekResult.matches.filter((m) =>
@@ -64,27 +66,33 @@ export default async function CompetitionPage({ params }: { params: Promise<{ id
       </div>
 
       <div className="container-page py-8 space-y-10">
-        <section>
-          <SectionHeader title={t.competitions.upcoming} icon={<TrophyIcon />} />
-          {matches.length > 0 ? (
-            <div className="grid gap-2.5 sm:grid-cols-2">
-              {matches.map((m) => (
-                <MatchCard key={m.id} match={m} showCompetition={false} />
-              ))}
-            </div>
-          ) : (
-            <EmptyState title={t.competitions.noUpcoming} />
-          )}
-        </section>
+        {unavailable ? (
+          <EmptyState title={t.competitions.dataUnavailable} description={t.competitions.dataUnavailableDesc} />
+        ) : (
+          <>
+            <section>
+              <SectionHeader title={t.competitions.upcoming} icon={<TrophyIcon />} />
+              {matches.length > 0 ? (
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  {matches.map((m) => (
+                    <MatchCard key={m.id} match={m} showCompetition={false} />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState title={t.competitions.noUpcoming} />
+              )}
+            </section>
 
-        <section>
-          <SectionHeader title={t.competitions.standings} />
-          {standings.length > 0 ? (
-            <StandingsTable entries={standings} />
-          ) : (
-            <EmptyState title={t.competitions.noStandings} description={t.competitions.noStandingsDesc} />
-          )}
-        </section>
+            <section>
+              <SectionHeader title={t.competitions.standings} />
+              {standings.length > 0 ? (
+                <StandingsTable entries={standings} />
+              ) : (
+                <EmptyState title={t.competitions.noStandings} description={t.competitions.noStandingsDesc} />
+              )}
+            </section>
+          </>
+        )}
       </div>
     </div>
   );

@@ -13,7 +13,7 @@ import { useLocale } from "@/lib/i18n/LocaleProvider";
  */
 export function CompetitionCard({ summary }: { summary: CompetitionSummary }) {
   const { t, locale } = useLocale();
-  const { competition, matchCount, nextMatch } = summary;
+  const { competition, matchCount, nextMatch, unavailable } = summary;
 
   return (
     <Link
@@ -38,25 +38,33 @@ export function CompetitionCard({ summary }: { summary: CompetitionSummary }) {
       </div>
 
       <div className="flex-1 p-4 flex flex-col gap-3">
-        <p className="text-xs text-muted">
-          <span className="font-extrabold text-ink tabular">{matchCount}</span> {t.competitions.matchCount}
-        </p>
+        {unavailable ? (
+          <div className="rounded-[var(--radius-sm)] bg-surface-2 border border-border p-3 text-xs">
+            <p className="text-muted-dim">{t.competitions.dataUnavailable}</p>
+          </div>
+        ) : (
+          <>
+            <p className="text-xs text-muted">
+              <span className="font-extrabold text-ink tabular">{matchCount}</span> {t.competitions.matchCount}
+            </p>
 
-        <div className="rounded-[var(--radius-sm)] bg-surface-2 border border-border p-3 text-xs">
-          {nextMatch ? (
-            <>
-              <p className="text-muted-dim mb-1">{t.competitions.nextMatch}</p>
-              <p className="font-bold truncate">
-                {nextMatch.homeTeam.name} <span className="text-muted-dim">{t.common.vs}</span> {nextMatch.awayTeam.name}
-              </p>
-              <p className="text-muted-dim mt-1 tabular" dir="ltr">
-                {formatKickoffTime(nextMatch.kickoff, locale)}
-              </p>
-            </>
-          ) : (
-            <p className="text-muted-dim">{t.competitions.noNextMatch}</p>
-          )}
-        </div>
+            <div className="rounded-[var(--radius-sm)] bg-surface-2 border border-border p-3 text-xs">
+              {nextMatch ? (
+                <>
+                  <p className="text-muted-dim mb-1">{t.competitions.nextMatch}</p>
+                  <p className="font-bold truncate">
+                    {nextMatch.homeTeam.name} <span className="text-muted-dim">{t.common.vs}</span> {nextMatch.awayTeam.name}
+                  </p>
+                  <p className="text-muted-dim mt-1 tabular" dir="ltr">
+                    {formatKickoffTime(nextMatch.kickoff, locale)}
+                  </p>
+                </>
+              ) : (
+                <p className="text-muted-dim">{t.competitions.noNextMatch}</p>
+              )}
+            </div>
+          </>
+        )}
 
         <span className="mt-auto text-sm font-bold text-primary group-hover:underline underline-offset-4">
           {t.competitions.viewCompetition}

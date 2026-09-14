@@ -167,8 +167,11 @@ export function mapApiLineupsToLineups(lineups: ApiTeamLineup[]): { home: TeamLi
   return { home: toTeamLineup(lineups[0]), away: toTeamLineup(lineups[1]) };
 }
 
-export function mapApiLeagueToCompetition(entry: ApiLeague): Competition {
-  // ألوان ثابتة مشتقة من معرّف البطولة حتى تبقى الهوية اللونية متسقة بين عمليات الجلب.
+// ألوان ثابتة مشتقة من معرّف البطولة (رقم API-Football) حتى تبقى الهوية
+// اللونية متسقة بين عمليات الجلب — ومصدَّرة هنا لاستخدامها أيضاً عند بناء
+// بطاقة بطولة بديلة (Placeholder) في competitions.service.ts حين يتعذّر
+// جلب البطولة حياً، بنفس اللون الذي كانت ستُعرَض به فعلياً لو نجح الجلب.
+export function competitionPalette(id: number): [string, string] {
   const palette: Array<[string, string]> = [
     ["#1f6b3a", "#0f3320"],
     ["#3a1f6b", "#1c0f33"],
@@ -177,7 +180,11 @@ export function mapApiLeagueToCompetition(entry: ApiLeague): Competition {
     ["#6b5a1f", "#332b0f"],
     ["#6b1f1f", "#330f0f"],
   ];
-  const [colorFrom, colorTo] = palette[entry.league.id % palette.length];
+  return palette[id % palette.length];
+}
+
+export function mapApiLeagueToCompetition(entry: ApiLeague): Competition {
+  const [colorFrom, colorTo] = competitionPalette(entry.league.id);
 
   return {
     id: tagId("af", entry.league.id),
