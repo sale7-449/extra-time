@@ -6,8 +6,7 @@ import { getUpcomingMatches } from "@/lib/services/matches.service";
 import type { Competition, Match, StandingsEntry } from "@/lib/types";
 import type { Locale } from "@/lib/i18n/messages";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
-import { localizeCompetitionName, localizeCompetitionShortName, localizeCountryName } from "@/lib/i18n/localized-names";
-import { getDisplayTeamName } from "@/lib/i18n/sports-names";
+import { localizeCompetitionName, localizeCompetitionShortName, localizeCountryName, localizeTeamName } from "@/lib/i18n/localized-names";
 
 async function localizeCompetition(competition: Competition): Promise<Competition> {
   const locale = await getServerLocale();
@@ -44,7 +43,7 @@ export async function getStandings(competitionId: string): Promise<StandingsEntr
   const locale = await getServerLocale();
   try {
     const entries = await footballProvider.getStandings(competitionId);
-    return entries.map((e) => ({ ...e, team: { ...e.team, name: getDisplayTeamName(e.team.id, e.team.name, locale) } }));
+    return entries.map((e) => ({ ...e, team: { ...e.team, name: localizeTeamName(e.team.name, locale) } }));
   } catch (error) {
     if (error instanceof RealDataUnavailableError) return [];
     throw error;
