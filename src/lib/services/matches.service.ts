@@ -1,7 +1,8 @@
 import { footballProvider, RealDataUnavailableError } from "@/lib/providers/football";
 import type { Match, Team, TeamLineup } from "@/lib/types";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
-import { localizeMockText, localizeTeamName } from "@/lib/i18n/localized-names";
+import { localizeMockText } from "@/lib/i18n/localized-names";
+import { getDisplayTeamName } from "@/lib/i18n/sports-names";
 
 /**
  * طبقة الخدمة — الواجهة (Components/Pages) تستدعي هذه الدوال فقط، ولا تعرف
@@ -25,7 +26,7 @@ export interface MatchResult {
 
 async function localizeMatches(matches: Match[]): Promise<Match[]> {
   const locale = await getServerLocale();
-  const localizeTeam = (team: Team): Team => ({ ...team, name: localizeTeamName(team.name, locale) });
+  const localizeTeam = (team: Team): Team => ({ ...team, name: getDisplayTeamName(team.id, team.name, locale) });
   const localizeLineup = (lineup: TeamLineup): TeamLineup => ({
     ...lineup,
     coach: lineup.coach ? localizeMockText(lineup.coach, locale) : lineup.coach,

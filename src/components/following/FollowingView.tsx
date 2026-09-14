@@ -13,7 +13,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { SectionHeader } from "@/components/shared/SectionHeader";
 import { MatchesIcon, NewsIcon, PlayIcon } from "@/components/icons";
-import { localizeTeamName, localizeCompetitionName } from "@/lib/i18n/localized-names";
+import { localizeCompetitionName } from "@/lib/i18n/localized-names";
+import { getDisplayTeamName } from "@/lib/i18n/sports-names";
 
 /**
  * "متابَعاتي" — بيانات حقيقية فقط، مبنية بالكامل من IDs/أسماء حقيقية محفوظة
@@ -72,7 +73,7 @@ export function FollowingView() {
           <section className="flex flex-wrap gap-2">
             {followedTeams.map((team) => (
               <div key={team.id} className="flex items-center gap-2 rounded-full border border-border bg-surface ps-3 pe-1 h-9">
-                <span className="text-sm font-bold">{localizeTeamName(team.name, locale)}</span>
+                <span className="text-sm font-bold">{getDisplayTeamName(team.id, team.name, locale)}</span>
                 <FollowButton target={{ kind: "team", ...team }} />
               </div>
             ))}
