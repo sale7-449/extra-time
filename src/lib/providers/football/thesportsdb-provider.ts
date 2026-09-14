@@ -7,6 +7,7 @@ import {
   mapTsdbLineupToLineups,
   mapTsdbStandingsToStandings,
 } from "./thesportsdb-mappers";
+import { CATALOG_TSDB_IDS } from "./competition-catalog";
 
 const BASE_URL = "https://www.thesportsdb.com/api/v1/json";
 
@@ -15,21 +16,9 @@ const BASE_URL = "https://www.thesportsdb.com/api/v1/json";
  * الفعلي لاحقاً يُفضَّل تسجيل مفتاح شخصي مجاني من thesportsdb.com. */
 const PUBLIC_TEST_KEY = "3";
 
+const CATALOG_TSDB_ID_SET = new Set<number>(CATALOG_TSDB_IDS);
+
 export class TheSportsDbError extends Error {}
-
-function isoDate(offsetDays: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
-}
-
-/** نافذة تواريخ (ماضٍ قريب + مستقبل قريب) تُستخدم لاكتشاف أي بطولة حقيقية
- * نشطة الآن عبر eventsday.php — بلا أي قائمة معرّفات بطولات ثابتة مسبقاً. */
-function dateWindow(pastDays: number, futureDays: number): string[] {
-  const dates: string[] = [];
-  for (let i = -pastDays; i <= futureDays; i++) dates.push(isoDate(i));
-  return dates;
-}
 
 function currentSeason(): string {
   const now = new Date();
@@ -78,32 +67,35 @@ export class TheSportsDbProvider implements FootballProvider {
     return results;
   }
 
-  /** eventsday.php لعدّة تواريخ معاً — كل مباريات كرة القدم لأي بطولة حقيقية
-   * في هذا اليوم، بلا حاجة لمعرفة معرّف البطولة مسبقاً. نقطة مشتركة يعيد
-   * استخدامها getMatchesByDateRange وgetRecentResults وgetCompetitions. */
-  private async fetchEventsForDates(dates: string[], revalidateSeconds: number): Promise<TsdbEvent[]> {
-    return this.staggered(dates.map((d) => () => this.request<TsdbEvent>("/eventsday.php", { d, s: "Soccer" }, revalidateSeconds)));
-  }
-
   async getLiveMatches(): Promise<Match[]> {
-    // بلا فلتر بطولات — livescore.php يُعيد أصلاً كل المباريات المباشرة الحقيقية.
     const rows = await this.request<TsdbEvent>("/livescore.php", { s: "Soccer" }, 60);
-    return rows.map(mapTsdbEventToMatch);
+    return rows.filter((e) => CATALOG_TSDB_ID_SET.has(Number(e.idLeague))).map(mapTsdbEventToMatch);
   }
 
   async getMatchesByDateRange(range: "today" | "tomorrow" | "week"): Promise<Match[]> {
     const revalidateSeconds = range === "week" ? 1800 : 600;
+    const rows = await this.staggered(
+      CATALOG_TSDB_IDS.map((id) => () => this.request<TsdbEvent>("/eventsnextleague.php", { id }, revalidateSeconds))
+    );
+
+    const today = new Date();
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const today0 = startOfDay(today).getTime();
     const days = range === "today" ? [0] : range === "tomorrow" ? [1] : [0, 1, 2, 3, 4, 5, 6];
-    const dates = days.map((offset) => isoDate(offset));
-    const rows = await this.fetchEventsForDates(dates, revalidateSeconds);
-    return rows.map(mapTsdbEventToMatch);
+
+    const filtered = rows.filter((e) => {
+      const eventDay = startOfDay(new Date(e.dateEvent)).getTime();
+      const diffDays = Math.round((eventDay - today0) / 86400000);
+      return days.includes(diffDays);
+    });
+
+    return filtered.map(mapTsdbEventToMatch);
   }
 
   async getRecentResults(): Promise<Match[]> {
-    // بحث بالتاريخ (آخر 5 أيام) بدل استعلام لكل بطولة على حدة — يلتقط نتيجة
-    // أي بطولة حقيقية منتهية بلا حاجة لمعرفة معرّفها مسبقاً.
-    const dates = dateWindow(5, 0).filter((d) => d !== isoDate(0));
-    const rows = await this.fetchEventsForDates(dates, 1800);
+    const rows = await this.staggered(
+      CATALOG_TSDB_IDS.map((id) => () => this.request<TsdbEvent>("/eventspastleague.php", { id }, 1800))
+    );
     return rows
       .map(mapTsdbEventToMatch)
       .filter((m) => m.status === "FINISHED")
@@ -126,17 +118,8 @@ export class TheSportsDbProvider implements FootballProvider {
   }
 
   async getCompetitions(): Promise<Competition[]> {
-    // مُشتقّة من البطولات التي تملك فعلياً مباريات ضمن نافذة واقعية (خمسة أيام
-    // ماضية إلى أسبوع قادم) — لا قائمة معرّفات ثابتة، فأي بطولة حقيقية جديدة
-    // (خليجية أو غيرها) تظهر تلقائياً. شارة/شعار البطولة الحقيقي غير متوفر في
-    // eventsday.php نفسها، فنجلبه بعد ذلك لكل معرّف بطولة اكتُشِف فعلياً عبر
-    // lookupleague.php — بلا أي قائمة معرّفات مكتوبة يدوياً في الكود.
-    const dates = dateWindow(5, 7);
-    const rows = await this.fetchEventsForDates(dates, 3600);
-    const leagueIds = [...new Set(rows.map((r) => r.idLeague))];
-
     const entries = await this.staggered(
-      leagueIds.map((id) => () => this.request<TsdbLeague>("/lookupleague.php", { id }, 3600))
+      CATALOG_TSDB_IDS.map((id) => () => this.request<TsdbLeague>("/lookupleague.php", { id }, 3600))
     );
     return entries.map(mapTsdbLeagueToCompetition);
   }

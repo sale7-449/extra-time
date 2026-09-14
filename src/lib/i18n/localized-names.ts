@@ -12,19 +12,34 @@ const COMPETITION_NAMES: Record<number, { ar: string; en: string }> = {
   39: { ar: "الدوري الإنجليزي الممتاز", en: "Premier League" },
   140: { ar: "الدوري الإسباني", en: "La Liga" },
   2: { ar: "دوري أبطال أوروبا", en: "UEFA Champions League" },
-  17: { ar: "دوري أبطال آسيا", en: "AFC Champions League" },
   78: { ar: "الدوري الألماني", en: "Bundesliga" },
+  // السعودية
+  504: { ar: "كأس الملك", en: "King's Cup" },
+  826: { ar: "كأس السوبر السعودي", en: "Saudi Super Cup" },
+  308: { ar: "دوري الدرجة الأولى", en: "Saudi First Division" },
+  // آسيوية (AFC) — معرّف 17 نفسه بعد إعادة تسمية الاتحاد الآسيوي للبطولة
+  17: { ar: "دوري أبطال آسيا للنخبة", en: "AFC Champions League Elite" },
+  18: { ar: "دوري أبطال آسيا 2", en: "AFC Champions League Two" },
+  // خليجية
+  25: { ar: "كأس الخليج للأمم", en: "Gulf Cup of Nations" },
+  1162: { ar: "بطولة الخليج للأندية", en: "Gulf Champions League" },
 };
 
-// اسم مختصر لعرضه في بطاقة المباراة الصغيرة (مساحة ضيقة) — نفس البطولات
-// الست فقط، بادئة موحّدة لعدم اختلاق اختصار غير موثّق لبطولة أخرى.
+// اسم مختصر لعرضه في بطاقة المباراة الصغيرة (مساحة ضيقة) — فقط للبطولات
+// الموجودة أعلاه، بادئة موحّدة لعدم اختلاق اختصار غير موثّق لبطولة أخرى.
 const COMPETITION_SHORT_NAMES: Record<number, { ar: string; en: string }> = {
   307: { ar: "روشن", en: "SPL" },
   39: { ar: "البريميرليج", en: "Premier League" },
   140: { ar: "الليغا", en: "La Liga" },
   2: { ar: "أبطال أوروبا", en: "UCL" },
-  17: { ar: "أبطال آسيا", en: "ACL" },
   78: { ar: "البوندسليغا", en: "Bundesliga" },
+  504: { ar: "كأس الملك", en: "King's Cup" },
+  826: { ar: "كأس السوبر", en: "Super Cup" },
+  308: { ar: "الدرجة الأولى", en: "Division 1" },
+  17: { ar: "أبطال آسيا للنخبة", en: "ACL Elite" },
+  18: { ar: "أبطال آسيا 2", en: "ACL Two" },
+  25: { ar: "كأس الخليج", en: "Gulf Cup" },
+  1162: { ar: "أبطال الخليج", en: "Gulf Champions" },
 };
 
 // اسم الدولة/الاتحاد كما يُعيده API-Football لكل بطولة من بطولاتنا الست فقط

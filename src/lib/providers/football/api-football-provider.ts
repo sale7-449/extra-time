@@ -17,24 +17,18 @@ import {
   mapApiStandingsToStandings,
   mapApiStatisticsToStats,
 } from "./mappers";
+import { CATALOG_AF_IDS } from "./competition-catalog";
 
 const BASE_URL = "https://v3.football.api-sports.io";
 
 const CURRENT_SEASON = new Date().getMonth() >= 6 ? new Date().getFullYear() : new Date().getFullYear() - 1;
 
+const CATALOG_AF_ID_SET = new Set<number>(CATALOG_AF_IDS);
+
 function isoDate(offsetDays: number): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
   return d.toISOString().slice(0, 10);
-}
-
-/** نافذة تواريخ (ماضٍ قريب + مستقبل قريب) تُستخدم لاكتشاف أي بطولة حقيقية
- * نشطة الآن — بلا أي قائمة معرّفات بطولات ثابتة مسبقاً. بطولة جديدة (خليجية
- * أو غيرها) تظهر تلقائياً بمجرد أن يعيدها المصدر ضمن هذه النافذة. */
-function dateWindow(pastDays: number, futureDays: number): string[] {
-  const dates: string[] = [];
-  for (let i = -pastDays; i <= futureDays; i++) dates.push(isoDate(i));
-  return dates;
 }
 
 export class ApiFootballError extends Error {}
@@ -75,11 +69,14 @@ export class ApiFootballProvider implements FootballProvider {
     }
   }
 
-  /** طلبات /fixtures?date=X لعدّة تواريخ معاً — نقطة مشتركة يعيد استخدامها كل
-   * من getMatchesByDateRange وgetRecentResults وgetCompetitions، بلا أي فلتر
-   * بطولات مسبَق: أي بطولة حقيقية للمصدر نفسها ضمن هذه التواريخ تظهر كما هي. */
+  /** طلبات /fixtures?date=X لعدّة تواريخ معاً، مفلترة على كتالوج البطولات
+   * المُختارة فقط (COMPETITION_CATALOG) — لا مباريات من بطولات عشوائية حول
+   * العالم لمجرد أن لها مباراة في هذا التاريخ. */
   private async fetchFixturesForDates(dates: string[], revalidateSeconds: number): Promise<ApiFixture[]> {
-    return this.staggered(dates.map((date) => () => this.request<ApiFixture>("/fixtures", { date }, revalidateSeconds)));
+    const fixtures = await this.staggered(
+      dates.map((date) => () => this.request<ApiFixture>("/fixtures", { date }, revalidateSeconds))
+    );
+    return fixtures.filter((f) => CATALOG_AF_ID_SET.has(f.league.id));
   }
 
   /** يُشغّل عدة طلبات مع فارق زمني بسيط بين كل بداية (لا كلها دفعة واحدة)
@@ -119,9 +116,8 @@ export class ApiFootballProvider implements FootballProvider {
   async getLiveMatches(): Promise<Match[]> {
     // 60 ثانية بدل 30 — لا تزال "شبه فورية"، لكن تُخفّض استهلاك الحصة اليومية
     // المحدودة إلى النصف لهذا المسار الأكثر استدعاءً (يُستطلَع من العميل كل 40ث).
-    // بلا فلتر بطولات — أي مباراة مباشرة حقيقية تظهر، أياً كانت بطولتها.
     const fixtures = await this.request<ApiFixture>("/fixtures", { live: "all" }, 60);
-    return fixtures.map(mapApiFixtureToMatch);
+    return fixtures.filter((f) => CATALOG_AF_ID_SET.has(f.league.id)).map(mapApiFixtureToMatch);
   }
 
   async getMatchesByDateRange(range: "today" | "tomorrow" | "week"): Promise<Match[]> {
@@ -136,11 +132,15 @@ export class ApiFootballProvider implements FootballProvider {
   }
 
   async getRecentResults(): Promise<Match[]> {
-    // بحث بالتاريخ (آخر 5 أيام) بدل استعلام لكل بطولة على حدة — يلتقط نتيجة
-    // أي بطولة حقيقية منتهية بلا حاجة لمعرفة معرّفها مسبقاً. نتائج منتهية لا
-    // تتغيّر بسرعة، فتخزين مؤقت أطول (30 دقيقة) مقبول تماماً هنا.
-    const dates = dateWindow(5, 0).filter((d) => d !== isoDate(0));
-    const fixtures = await this.fetchFixturesForDates(dates, 1800);
+    // last يُطبَّق لكل بطولة على حدة من كتالوج البطولات المُختار — كأس قد لا
+    // يكون له أي مباراة ضمن نافذة تاريخ قصيرة، فالاستعلام المباشر بمعرّف
+    // البطولة أوثق من اكتشاف عبر تواريخ. نتائج منتهية لا تتغيّر بسرعة، فتخزين
+    // مؤقت أطول (30 دقيقة) مقبول تماماً هنا.
+    const fixtures = await this.staggered(
+      CATALOG_AF_IDS.map(
+        (league) => () => this.request<ApiFixture>("/fixtures", { league, season: CURRENT_SEASON, last: 5 }, 1800)
+      )
+    );
     return fixtures
       .map(mapApiFixtureToMatch)
       .filter((m) => m.status === "FINISHED")
@@ -170,21 +170,14 @@ export class ApiFootballProvider implements FootballProvider {
   }
 
   async getCompetitions(): Promise<Competition[]> {
-    // مُشتقّة من البطولات التي تملك فعلياً مباريات ضمن نافذة واقعية (خمسة أيام
-    // ماضية إلى أسبوع قادم) — لا قائمة معرّفات ثابتة، فأي بطولة حقيقية جديدة
-    // (خليجية أو غيرها) تظهر تلقائياً بمجرد أن يعيدها المصدر نفسه.
-    const dates = dateWindow(5, 7);
-    const fixtures = await this.fetchFixturesForDates(dates, 3600);
-
-    const leagues = new Map<number, ApiFixture["league"]>();
-    for (const f of fixtures) if (!leagues.has(f.league.id)) leagues.set(f.league.id, f.league);
-
-    return [...leagues.values()].map((league) =>
-      mapApiLeagueToCompetition({
-        league: { id: league.id, name: league.name, type: "League", logo: league.logo },
-        country: { name: league.country },
-      })
+    // استعلام مباشر بمعرّفات الكتالوج المُختار يدوياً (COMPETITION_CATALOG) —
+    // يُعيد بيانات البطولة الحقيقية دائماً بغضّ النظر عن وجود مباراة هذا
+    // الأسبوع تحديداً أو لا (كأس قد يكون بين جولتين)، بلا اكتشاف عشوائي من
+    // نتائج مباريات قد يُدخل بطولات غير مهمة لمجرد أن لها مباراة اليوم.
+    const entries = await this.staggered(
+      CATALOG_AF_IDS.map((id) => () => this.request<ApiLeague>("/leagues", { id }, 3600))
     );
+    return entries.map(mapApiLeagueToCompetition);
   }
 
   async getCompetitionById(id: string): Promise<Competition | null> {
