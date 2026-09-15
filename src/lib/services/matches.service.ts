@@ -1,7 +1,7 @@
 import { footballProvider, RealDataUnavailableError } from "@/lib/providers/football";
 import type { LineupPlayer, Match, MatchEvent, Team, TeamLineup } from "@/lib/types";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
-import { localizeMockText } from "@/lib/i18n/localized-names";
+import { localizeMockText, localizeMatchInfoText } from "@/lib/i18n/localized-names";
 import { getDisplayTeamName, getLocalizedPlayerName } from "@/lib/i18n/sports-names";
 
 /**
@@ -26,6 +26,11 @@ export interface MatchResult {
 
 async function localizeMatches(matches: Match[]): Promise<Match[]> {
   const locale = await getServerLocale();
+  // City/Venue/Referee فقط: نص عربي (Mock) → إنجليزي عبر localizeMockText
+  // كما كان دائماً، ونص إنجليزي حي (API-Football) → عربي فقط إن وُجد تعريب
+  // موثوق مسبقاً عبر localizeMatchInfoText، وإلا يبقى كما هو في الحالتين.
+  const localizeMatchInfo = (text: string): string =>
+    locale === "en" ? localizeMockText(text, locale) : localizeMatchInfoText(text, locale);
   const localizeTeam = (team: Team): Team => ({ ...team, name: getDisplayTeamName(team.id, team.name, locale) });
   const localizePlayer = (player: LineupPlayer): LineupPlayer => ({
     ...player,
@@ -43,6 +48,10 @@ async function localizeMatches(matches: Match[]): Promise<Match[]> {
     ...event,
     playerName: getLocalizedPlayerName(event.playerId, event.playerName, locale),
     assistName: event.assistName ? getLocalizedPlayerName(event.assistId, event.assistName, locale) : event.assistName,
+    // "Penalty" هي القيمة الوحيدة المُعرَّبة هنا عمداً — نفس القيمة الحرفية
+    // التي تضعها mapApiEventsToEvents فقط لهدف الجزاء (راجع mappers.ts)؛ أي
+    // قيمة detail أخرى ("Substitution 1"...) تبقى كما هي بلا تغيير.
+    detail: event.detail === "Penalty" && locale === "ar" ? "ركلة جزاء" : event.detail,
   });
 
   return matches.map((m) => ({
@@ -50,9 +59,9 @@ async function localizeMatches(matches: Match[]): Promise<Match[]> {
     homeTeam: localizeTeam(m.homeTeam),
     awayTeam: localizeTeam(m.awayTeam),
     round: m.round ? localizeMockText(m.round, locale) : m.round,
-    venue: m.venue ? localizeMockText(m.venue, locale) : m.venue,
-    city: m.city ? localizeMockText(m.city, locale) : m.city,
-    referee: m.referee ? localizeMockText(m.referee, locale) : m.referee,
+    venue: m.venue ? localizeMatchInfo(m.venue) : m.venue,
+    city: m.city ? localizeMatchInfo(m.city) : m.city,
+    referee: m.referee ? localizeMatchInfo(m.referee) : m.referee,
     events: m.events.map(localizeEvent),
     lineups: m.lineups
       ? { home: localizeLineup(m.lineups.home), away: localizeLineup(m.lineups.away) }

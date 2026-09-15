@@ -332,12 +332,19 @@ export function getLocalizedPlayerName(
  * التعريب المبني على المعرّف الحقيقي أولاً (أدق)، ثم تحتاط بنظام التعريب
  * النصي القديم (localizeTeamName) لأي فريق لم يُدرَج بعد في القاموس الجديد
  * — بلا أي شرط إضافي داخل المُستدعي نفسه.
+ *
+ * الإنجليزية: تُعاد originalName الحية من المصدر دائماً بلا أي وسيط — لا
+ * تُستشار localizeTeamName إطلاقاً لهذه الحالة، لأن جدولها القديم
+ * TEAM_NAME_OVERRIDES يحمل نسخة إنجليزية مختصرة يدوياً (مثل "Al Hilal" بدل
+ * "Al-Hilal Saudi FC" الحقيقي) صُمِّمت أصلاً لبيانات Mock، لا لعرض الاسم
+ * الحي كما وصل من المصدر.
  */
 export function getDisplayTeamName(
   teamId: number | string | null | undefined,
   originalName: string,
   locale: Locale
 ): string {
+  if (locale !== "ar") return originalName;
   const byId = getLocalizedTeamName(teamId, originalName, locale);
   return byId !== originalName ? byId : localizeTeamName(originalName, locale);
 }

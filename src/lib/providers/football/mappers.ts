@@ -56,11 +56,27 @@ const EVENT_TYPE_MAP: Record<string, MatchEventType> = {
   subst: "SUBSTITUTION",
 };
 
+// بادئات عامة شائعة في أسماء الأندية العربية/الخليجية الحقيقية على
+// API-Football ("Al-Hilal Saudi FC"، "Al Ahli Jeddah"...) — أخذ أول 3 أحرف
+// من الاسم الكامل مباشرة كان يُنتج "AL-" لكل ناد يبدأ بها بلا تمييز. إزالة
+// البادئة أولاً (إن وُجدت) ثم أخذ 3 أحرف مما تبقّى يُنتج رمزاً مميّزاً فعلياً
+// (الهلال→HIL، النصر→NAS، الاتحاد→ITT...) بلا أي تخمين أو بيانات جديدة —
+// حتمي بالكامل من الاسم نفسه.
+const GENERIC_TEAM_NAME_PREFIXES = ["al-", "al "];
+
+function deriveShortName(name: string): string {
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  const prefix = GENERIC_TEAM_NAME_PREFIXES.find((p) => lower.startsWith(p));
+  const rest = prefix ? trimmed.slice(prefix.length).trim() : trimmed;
+  return (rest || trimmed).slice(0, 3).toUpperCase();
+}
+
 export function mapApiTeamToTeam(team: ApiTeam): Team {
   return {
     id: tagId("af", team.id),
     name: team.name,
-    shortName: team.name.slice(0, 3).toUpperCase(),
+    shortName: deriveShortName(team.name),
     logoUrl: team.logo,
     country: team.country ?? "",
   };

@@ -153,6 +153,22 @@ export function localizeMockText(text: string, locale: Locale): string {
   return MOCK_TEXT_EN[text.trim()] ?? text;
 }
 
+// فهرس عكسي محسوب من MOCK_TEXT_EN نفسه — بلا أي بيانات جديدة، نفس الأزواج
+// الموثَّقة أعلاه فقط. يتيح تعريب حقول مباراة حية إنجليزية من API-Football
+// (ملعب/مدينة/حكم) للعربية حين تطابق نصاً معتمَداً هنا حرفياً، وإلا يبقى
+// النص الأصلي كما هو بصدق — لا اختلاق تعريب لملعب/مدينة/حكم غير موثّق.
+const MOCK_TEXT_AR: Record<string, string> = Object.fromEntries(
+  Object.entries(MOCK_TEXT_EN).map(([ar, en]) => [en, ar])
+);
+
+/** عكس اتجاه localizeMockText تحديداً لحقول معلومات المباراة الحرة
+ * (ملعب/مدينة/حكم) القادمة إنجليزية من مصدر حي — لا علاقة له بأسماء
+ * الفرق/اللاعبين/البطولات (لكل منها دالة تعريب مستقلة أصلاً). */
+export function localizeMatchInfoText(text: string, locale: Locale): string {
+  if (locale !== "ar") return text;
+  return MOCK_TEXT_AR[text.trim()] ?? text;
+}
+
 function normalize(name: string): string {
   return name.trim().toLowerCase().replace(/-/g, " ").replace(/\s+/g, " ");
 }
