@@ -100,7 +100,9 @@ export function mapApiEventsToEvents(events: ApiEvent[]): MatchEvent[] {
         type,
         teamId: tagId("af", e.team.id),
         playerName: e.player.name ?? "—",
+        playerId: e.player.id !== null ? tagId("af", e.player.id) : undefined,
         assistName: e.assist.name ?? undefined,
+        assistId: e.assist.id !== null ? tagId("af", e.assist.id) : undefined,
         // نفس حقل detail المُستخدَم أصلاً للتبديل — يحمل الآن نوع الهدف أيضاً
         // حين يكون فعلاً مذكوراً في المصدر ("Penalty") لا نوعاً افتراضياً
         // ("Normal Goal" غير مفيد للعرض، و"Own Goal" مُعلَّم أصلاً عبر isOwnGoal).
@@ -153,6 +155,7 @@ export function mapApiLineupsToLineups(lineups: ApiTeamLineup[]): { home: TeamLi
     players.map((p) => ({
       number: p.player.number,
       name: p.player.name,
+      playerId: tagId("af", p.player.id),
       position: normalizePositionCode(p.player.pos),
       grid: p.player.grid,
       photoUrl: p.player.photo ?? null,

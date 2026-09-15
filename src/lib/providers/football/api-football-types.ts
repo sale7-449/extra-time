@@ -29,8 +29,8 @@ export interface ApiFixture {
 export interface ApiEvent {
   time: { elapsed: number; extra: number | null };
   team: { id: number };
-  player: { name: string | null };
-  assist: { name: string | null };
+  player: { id: number | null; name: string | null };
+  assist: { id: number | null; name: string | null };
   type: "Goal" | "Card" | "subst" | string;
   detail: string;
 }
@@ -46,7 +46,7 @@ export interface ApiTeamStatistics {
 }
 
 export interface ApiLineupPlayer {
-  player: { number: number; name: string; pos: string | null; grid: string | null; photo?: string | null };
+  player: { id: number; number: number; name: string; pos: string | null; grid: string | null; photo?: string | null };
 }
 
 export interface ApiTeamLineup {

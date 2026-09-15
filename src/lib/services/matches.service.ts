@@ -1,8 +1,8 @@
 import { footballProvider, RealDataUnavailableError } from "@/lib/providers/football";
-import type { Match, Team, TeamLineup } from "@/lib/types";
+import type { LineupPlayer, Match, MatchEvent, Team, TeamLineup } from "@/lib/types";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
 import { localizeMockText } from "@/lib/i18n/localized-names";
-import { getDisplayTeamName } from "@/lib/i18n/sports-names";
+import { getDisplayTeamName, getLocalizedPlayerName } from "@/lib/i18n/sports-names";
 
 /**
  * طبقة الخدمة — الواجهة (Components/Pages) تستدعي هذه الدوال فقط، ولا تعرف
@@ -27,9 +27,22 @@ export interface MatchResult {
 async function localizeMatches(matches: Match[]): Promise<Match[]> {
   const locale = await getServerLocale();
   const localizeTeam = (team: Team): Team => ({ ...team, name: getDisplayTeamName(team.id, team.name, locale) });
+  const localizePlayer = (player: LineupPlayer): LineupPlayer => ({
+    ...player,
+    name: getLocalizedPlayerName(player.playerId, player.name, locale),
+  });
   const localizeLineup = (lineup: TeamLineup): TeamLineup => ({
     ...lineup,
     coach: lineup.coach ? localizeMockText(lineup.coach, locale) : lineup.coach,
+    startXI: lineup.startXI.map(localizePlayer),
+    substitutes: lineup.substitutes.map(localizePlayer),
+  });
+  // يغطي مسجّلي الأهداف وصانعيها وأسماء اللاعبين في التبديلات/البطاقات
+  // معاً — نفس حقل playerName/assistName لكل أنواع الأحداث.
+  const localizeEvent = (event: MatchEvent): MatchEvent => ({
+    ...event,
+    playerName: getLocalizedPlayerName(event.playerId, event.playerName, locale),
+    assistName: event.assistName ? getLocalizedPlayerName(event.assistId, event.assistName, locale) : event.assistName,
   });
 
   return matches.map((m) => ({
@@ -40,6 +53,7 @@ async function localizeMatches(matches: Match[]): Promise<Match[]> {
     venue: m.venue ? localizeMockText(m.venue, locale) : m.venue,
     city: m.city ? localizeMockText(m.city, locale) : m.city,
     referee: m.referee ? localizeMockText(m.referee, locale) : m.referee,
+    events: m.events.map(localizeEvent),
     lineups: m.lineups
       ? { home: localizeLineup(m.lineups.home), away: localizeLineup(m.lineups.away) }
       : m.lineups,

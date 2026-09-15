@@ -27,7 +27,11 @@ export interface MatchEvent {
   type: MatchEventType;
   teamId: string;
   playerName: string;
+  /** معرّف اللاعب الحقيقي المُوسَوم بمصدره (af-...) إن توفّر من المصدر —
+   * يُستخدم لتعريب الاسم عبر sports-names.ts، غير مضمون التوفر لكل مصدر. */
+  playerId?: string;
   assistName?: string;
+  assistId?: string;
   detail?: string;
   isOwnGoal?: boolean;
 }
@@ -54,6 +58,9 @@ export interface MatchStatLine {
 export interface LineupPlayer {
   number: number;
   name: string;
+  /** معرّف اللاعب الحقيقي المُوسَوم بمصدره (af-...) إن توفّر من المصدر —
+   * يُستخدم لتعريب الاسم عبر sports-names.ts، غير مضمون التوفر لكل مصدر. */
+  playerId?: string;
   position: string;
   grid?: string | null;
   photoUrl?: string | null;
