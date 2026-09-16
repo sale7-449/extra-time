@@ -80,7 +80,10 @@ export async function forgotPasswordAction(_prev: AuthActionState, formData: For
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/reset-password`,
   });
-  if (error) return { error: t.resetFailed };
+  if (error) {
+    console.error("resetPasswordForEmail failed:", error.message, error.status);
+    return { error: t.resetFailed };
+  }
 
   return { error: null };
 }
