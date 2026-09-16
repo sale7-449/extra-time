@@ -28,7 +28,11 @@ export async function signInAction(_prev: AuthActionState, formData: FormData): 
   const password = String(formData.get("password") ?? "");
 
   const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) return { error: t.invalidCredentials };
+  if (error) {
+    // تشخيص مؤقت: نعرض رسالة Supabase الأصلية للمستخدم مباشرة بدل الرسالة
+    // العامة، لتحديد السبب الحقيقي — سيُعاد هذا إلى t.invalidCredentials لاحقاً.
+    return { error: `${error.message} (status: ${error.status})` };
+  }
 
   revalidatePath("/", "layout");
   redirect("/profile");
