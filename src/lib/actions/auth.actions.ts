@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
@@ -57,6 +58,16 @@ export async function signUpAction(_prev: AuthActionState, formData: FormData): 
   redirect("/profile");
 }
 
+/** أصل الطلب الحقيقي الحالي (وليس NEXT_PUBLIC_SITE_URL — تلك تحمل placeholder
+ * افتراضياً إن لم تُضبَط بعد، راجع sitemap.ts) — مبني من ترويسات الطلب
+ * الفعلية، فيطابق دائماً نطاق Production الحقيقي بلا أي إعداد إضافي. */
+async function getRequestOrigin(): Promise<string> {
+  const headersList = await headers();
+  const host = headersList.get("x-forwarded-host") ?? headersList.get("host");
+  const proto = headersList.get("x-forwarded-proto") ?? "https";
+  return `${proto}://${host}`;
+}
+
 export async function forgotPasswordAction(_prev: AuthActionState, formData: FormData): Promise<AuthActionState> {
   const t = await authErrors();
   if (!isSupabaseConfigured()) return { error: t.notConfigured };
@@ -65,7 +76,10 @@ export async function forgotPasswordAction(_prev: AuthActionState, formData: For
   if (!supabase) return { error: t.notConfigured };
 
   const email = String(formData.get("email") ?? "");
-  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  const origin = await getRequestOrigin();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/reset-password`,
+  });
   if (error) return { error: t.resetFailed };
 
   return { error: null };
