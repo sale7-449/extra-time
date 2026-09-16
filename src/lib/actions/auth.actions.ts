@@ -24,7 +24,7 @@ export async function signInAction(_prev: AuthActionState, formData: FormData): 
   const supabase = await createClient();
   if (!supabase) return { error: t.notConfigured };
 
-  const email = String(formData.get("email") ?? "");
+  const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
 
   const { error } = await supabase.auth.signInWithPassword({ email, password });
