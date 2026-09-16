@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { getCurrentUser } from "@/lib/services/favorites.service";
-import { signOutAction } from "@/lib/actions/auth.actions";
+import { getAdminSession } from "@/lib/admin/session";
+import { adminLogoutAction } from "@/lib/actions/admin-auth.actions";
 import { getServerLocale, getMessages } from "@/lib/i18n/getServerLocale";
 
 export async function generateMetadata() {
@@ -9,13 +9,12 @@ export async function generateMetadata() {
 }
 
 /**
- * بوابة لوحة المسؤول — بسيطة عمداً في هذه المرحلة. الوصول لهذه الصفحة أصلاً
- * مضمون أنه Admin حقيقي (يحميها src/app/admin/layout.tsx)، فلا حاجة لأي
- * فحص إضافي هنا.
+ * بوابة لوحة المسؤول — الوصول لهذه الصفحة أصلاً مضمون أنه جلسة Admin صالحة
+ * (يحميها ../layout.tsx)، فلا حاجة لأي فحص إضافي هنا.
  */
 export default async function AdminPage() {
   const t = getMessages(await getServerLocale());
-  const user = await getCurrentUser();
+  const session = await getAdminSession();
 
   return (
     <div className="container-page py-16 md:py-24 flex justify-center">
@@ -25,9 +24,9 @@ export default async function AdminPage() {
           <p className="text-sm text-muted">
             {t.admin.accountStatusLabel}: <span className="font-bold text-primary">{t.admin.accountStatusAdmin}</span>
           </p>
-          {user?.email && (
+          {session?.username && (
             <p className="text-xs text-muted-dim mt-1" dir="ltr">
-              {user.email}
+              {session.username}
             </p>
           )}
         </div>
@@ -39,7 +38,7 @@ export default async function AdminPage() {
           {t.admin.goToContent}
         </Link>
 
-        <form action={signOutAction}>
+        <form action={adminLogoutAction}>
           <button
             type="submit"
             className="h-11 w-full rounded-[var(--radius-sm)] border border-border text-sm font-bold text-muted hover:text-error hover:border-error/40 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
