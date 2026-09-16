@@ -52,14 +52,20 @@ export async function adminSetupAction(_prev: AdminAuthState, formData: FormData
 }
 
 export async function adminLoginAction(_prev: AdminAuthState, formData: FormData): Promise<AdminAuthState> {
-  const t = (await localeMessages()).adminAuth;
-
   const username = String(formData.get("username") ?? "").trim();
   const password = String(formData.get("password") ?? "");
 
-  const credential = await getAdminCredentialByUsername(username);
-  if (!credential || !verifyPasswordHash(password, credential.passwordHash)) {
-    return { error: t.invalidCredentials };
+  // تشخيص مؤقت — يُزال فور معرفة سبب فشل /admin/login على Production.
+  // لا يعرض password_hash ولا password ولا أي secret، فقط تصنيف الفشل.
+  const { credential, queryError } = await getAdminCredentialByUsername(username);
+  if (queryError) {
+    return { error: `[DEBUG] Supabase query error: ${queryError}` };
+  }
+  if (!credential) {
+    return { error: "[DEBUG] No matching record for this username." };
+  }
+  if (!verifyPasswordHash(password, credential.passwordHash)) {
+    return { error: "[DEBUG] Record found, but password verification failed." };
   }
 
   await createAdminSession(credential.username);

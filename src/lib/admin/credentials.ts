@@ -26,14 +26,23 @@ export async function adminCredentialExists(): Promise<boolean> {
   return Boolean(count && count > 0);
 }
 
-export async function getAdminCredentialByUsername(username: string): Promise<AdminCredential | null> {
+/** تشخيص مؤقت (سيُزال بعد حسم سبب فشل /admin/login): نميّز الآن بين "لا
+ * عميل service_role مُهيَّأ"، "خطأ استعلام Supabase"، و"لا يوجد سجل" —
+ * بدل إخفائها جميعاً خلف null كما كان سابقاً. */
+export interface AdminCredentialLookup {
+  credential: AdminCredential | null;
+  queryError: string | null;
+}
+
+export async function getAdminCredentialByUsername(username: string): Promise<AdminCredentialLookup> {
   const supabase = createServiceRoleClient();
-  if (!supabase) return null;
+  if (!supabase) return { credential: null, queryError: "service_role_client_not_configured" };
 
-  const { data } = await supabase.from(TABLE).select("username, email, password_hash").eq("username", username).maybeSingle();
-  if (!data) return null;
+  const { data, error } = await supabase.from(TABLE).select("username, email, password_hash").eq("username", username).maybeSingle();
+  if (error) return { credential: null, queryError: error.message };
+  if (!data) return { credential: null, queryError: null };
 
-  return { username: data.username, email: data.email, passwordHash: data.password_hash };
+  return { credential: { username: data.username, email: data.email, passwordHash: data.password_hash }, queryError: null };
 }
 
 export async function createAdminCredential(username: string, email: string, passwordHash: string): Promise<void> {
