@@ -14,6 +14,8 @@ import {
 } from "@/lib/providers/social/content-builders";
 import { encodeNewsId } from "@/lib/news-id";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
+import { COMPETITION_CATALOG } from "@/lib/providers/football/competition-catalog";
+import { canonicalCompetitionId, tagId } from "@/lib/providers/football/ids";
 import type { ContentItem, Attachment } from "@/lib/providers/social/types";
 import type { Match, Team } from "@/lib/types";
 import { getAdminSession } from "@/lib/admin/session";
@@ -283,25 +285,46 @@ export async function searchMatchesAction(query: string): Promise<Match[]> {
   return matches.slice(0, 20);
 }
 
-/** بحث أندية حقيقية — تُستخلَص من نفس تجمّع المباريات (لا دليل أندية مستقل
- * في المنصة بعد) — نادٍ بلا أي مباراة ضمن هذه النافذة الزمنية لن يظهر بعد،
- * قيد بيانات حقيقي لا نتغلّب عليه باختلاق نادٍ. */
-export async function searchTeamsAction(query: string): Promise<Team[]> {
+export interface TeamsByCompetitionGroup {
+  /** معرّف بطولة موسوم (af-140...) — لعرض اسمها عبر localizeCompetitionShortName. */
+  competitionId: string;
+  teams: Team[];
+}
+
+/**
+ * أندية حقيقية مُصنَّفة حسب الدوري/المسابقة الحقيقية أولاً — تُستخلَص من نفس
+ * تجمّع المباريات (لا دليل أندية مستقل في المنصة بعد)، مُجمَّعة عبر
+ * canonicalCompetitionId لتوحيد نفس البطولة القادمة من مصادر مختلفة
+ * (af/tsdb). نادٍ لا تُحَل بطولته لأي عنصر في الكتالوج (نادر، غالباً بيانات
+ * مصدر ثانوي) يظهر صراحة ضمن "other" بدل تصنيف مُخترَع. نادٍ بلا أي مباراة
+ * ضمن هذه النافذة الزمنية لن يظهر بعد — قيد بيانات حقيقي، لا نتغلّب عليه
+ * باختلاق نادٍ أو بطولة. نادٍ يلعب في أكثر من مسابقة يظهر بمعرّفه الحقيقي
+ * نفسه تحت كل مسابقة لعب فيها فعلاً — لا نسخ مُصطنَعة، مجرّد انعكاس للواقع.
+ */
+export async function listTeamsByCompetitionAction(): Promise<{ groups: TeamsByCompetitionGroup[]; other: Team[] }> {
   await requireAdminUsername();
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
 
   const [recent, week] = await Promise.all([getRecentResults(), getUpcomingMatches("week")]);
-  const seen = new Set<string>();
-  const teams: Team[] = [];
+  const byCanonical = new Map<string, Map<string, Team>>();
+  const other = new Map<string, Team>();
+  const catalogCanonicalIds = new Set(COMPETITION_CATALOG.filter((e) => e.afId !== undefined).map((e) => String(e.afId)));
+
   for (const m of [...recent.matches, ...week.matches]) {
+    const canonical = canonicalCompetitionId(m.competitionId);
+    const bucket = canonical && catalogCanonicalIds.has(canonical) ? byCanonical.get(canonical) ?? new Map<string, Team>() : null;
     for (const team of [m.homeTeam, m.awayTeam]) {
-      if (seen.has(team.id) || !team.name.toLowerCase().includes(q)) continue;
-      seen.add(team.id);
-      teams.push(team);
+      if (bucket) bucket.set(team.id, team);
+      else other.set(team.id, team);
     }
+    if (canonical && bucket) byCanonical.set(canonical, bucket);
   }
-  return teams.slice(0, 20);
+
+  const groups: TeamsByCompetitionGroup[] = COMPETITION_CATALOG.filter((e) => e.afId !== undefined && byCanonical.has(String(e.afId))).map((e) => ({
+    competitionId: tagId("af", e.afId!),
+    teams: [...byCanonical.get(String(e.afId))!.values()].sort((a, b) => a.name.localeCompare(b.name)),
+  }));
+
+  return { groups, other: [...other.values()].sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
 /** تفاصيل مباراة كاملة (بأحداثها) بعد اختيارها — getMatch (خلافاً لقوائم

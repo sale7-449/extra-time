@@ -23,7 +23,8 @@ import {
   archiveDraftAction,
   listMatchGroupsAction,
   searchMatchesAction,
-  searchTeamsAction,
+  listTeamsByCompetitionAction,
+  type TeamsByCompetitionGroup,
   getMatchDetailAction,
   getResolvedSubjectBaseAction,
   type MatchGroups,
@@ -177,10 +178,11 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   const [summaryTitle, setSummaryTitle] = useState("");
   const [summaryText, setSummaryText] = useState("");
 
-  // أندية
-  const [teamQuery, setTeamQuery] = useState("");
-  const [teamSearching, setTeamSearching] = useState(false);
-  const [teamResults, setTeamResults] = useState<Team[]>([]);
+  // أندية — مُصنَّفة حسب الدوري أولاً
+  const [teamGroups, setTeamGroups] = useState<{ groups: TeamsByCompetitionGroup[]; other: Team[] } | null>(null);
+  const [teamGroupsLoading, setTeamGroupsLoading] = useState(false);
+  const [selectedLeagueId, setSelectedLeagueId] = useState<string | "OTHER" | null>(null);
+  const [teamFilter, setTeamFilter] = useState("");
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
 
   // بطولات
@@ -217,8 +219,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     setSelectedEventId("");
     setSummaryTitle("");
     setSummaryText("");
-    setTeamQuery("");
-    setTeamResults([]);
+    setSelectedLeagueId(null);
+    setTeamFilter("");
     setSelectedTeam(null);
     setSelectedCompetitionId(null);
     setCreateError(null);
@@ -233,6 +235,14 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
         setMatchGroups(await listMatchGroupsAction());
       } finally {
         setMatchGroupsLoading(false);
+      }
+    }
+    if (s === "TEAM" && !teamGroups) {
+      setTeamGroupsLoading(true);
+      try {
+        setTeamGroups(await listTeamsByCompetitionAction());
+      } finally {
+        setTeamGroupsLoading(false);
       }
     }
   }
@@ -379,17 +389,6 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       );
     } finally {
       setCreateLoading(false);
-    }
-  }
-
-  async function handleTeamSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!teamQuery.trim()) return;
-    setTeamSearching(true);
-    try {
-      setTeamResults(await searchTeamsAction(teamQuery));
-    } finally {
-      setTeamSearching(false);
     }
   }
 
@@ -757,33 +756,9 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
 
               {/* ===== أندية ===== */}
               {subject === "TEAM" &&
-                (!selectedTeam ? (
-                  <div className="space-y-4">
-                    <form onSubmit={handleTeamSearch} className="flex gap-2">
-                      <Input value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder={t.admin.teamSearchPlaceholder} />
-                      <Button type="submit" disabled={teamSearching} variant="secondary">
-                        {teamSearching ? t.admin.matchSearching : t.admin.matchSearchButton}
-                      </Button>
-                    </form>
-                    {teamResults.length === 0 ? (
-                      <p className="text-sm text-muted-dim">{t.admin.teamSelectHint}</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {teamResults.map((team) => (
-                          <li key={team.id}>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedTeam(team)}
-                              className="w-full text-start rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors text-sm font-bold"
-                            >
-                              {team.name}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ) : (
+                (teamGroupsLoading ? (
+                  <p className="text-sm text-muted-dim">{t.admin.matchSearching}</p>
+                ) : !teamGroups ? null : selectedTeam ? (
                   <div className="space-y-4">
                     <div className="rounded-[var(--radius-sm)] border border-border p-3 flex items-center justify-between">
                       <span className="text-sm font-bold">{selectedTeam.name}</span>
@@ -792,6 +767,72 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                       </button>
                     </div>
                     {renderManualForm(["NEWS", "IMAGE", "VIDEO"], () => submitManual("TEAM", selectedTeam.id))}
+                  </div>
+                ) : selectedLeagueId ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold">
+                        {selectedLeagueId === "OTHER" ? t.admin.otherClubsLabel : localizeCompetitionShortName(selectedLeagueId, locale) ?? selectedLeagueId}
+                      </span>
+                      <button type="button" onClick={() => { setSelectedLeagueId(null); setTeamFilter(""); }} className="text-xs font-bold text-primary">
+                        {t.admin.changeLeague}
+                      </button>
+                    </div>
+                    <Input value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} placeholder={t.admin.teamSearchPlaceholder} />
+                    {(() => {
+                      const teams =
+                        selectedLeagueId === "OTHER" ? teamGroups.other : teamGroups.groups.find((g) => g.competitionId === selectedLeagueId)?.teams ?? [];
+                      const filtered = teamFilter.trim()
+                        ? teams.filter((team) => team.name.toLowerCase().includes(teamFilter.trim().toLowerCase()))
+                        : teams;
+                      return filtered.length === 0 ? (
+                        <p className="text-sm text-muted-dim">{t.admin.noTeamsInLeague}</p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {filtered.map((team) => (
+                            <li key={team.id}>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedTeam(team)}
+                                className="w-full text-start rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors text-sm font-bold"
+                              >
+                                {team.name}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-dim mb-1">{t.admin.leagueSelectHint}</p>
+                    <ul className="space-y-2">
+                      {teamGroups.groups.map((g) => (
+                        <li key={g.competitionId}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedLeagueId(g.competitionId)}
+                            className="w-full flex items-center justify-between rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors text-sm font-bold"
+                          >
+                            <span>{localizeCompetitionShortName(g.competitionId, locale) ?? g.competitionId}</span>
+                            <Badge tone="neutral">{g.teams.length}</Badge>
+                          </button>
+                        </li>
+                      ))}
+                      {teamGroups.other.length > 0 && (
+                        <li>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedLeagueId("OTHER")}
+                            className="w-full flex items-center justify-between rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors text-sm font-bold"
+                          >
+                            <span>{t.admin.otherClubsLabel}</span>
+                            <Badge tone="neutral">{teamGroups.other.length}</Badge>
+                          </button>
+                        </li>
+                      )}
+                    </ul>
                   </div>
                 ))}
 
