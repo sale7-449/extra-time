@@ -10,6 +10,7 @@ import type {
   ApiTeamStatistics,
 } from "./api-football-types";
 import {
+  isLiveApiFootballStatus,
   mapApiEventsToEvents,
   mapApiFixtureToMatch,
   mapApiLeagueToCompetition,
@@ -74,39 +75,63 @@ export class ApiFootballProvider implements FootballProvider {
    * العالم لمجرد أن لها مباراة في هذا التاريخ. */
   private async fetchFixturesForDates(dates: string[], revalidateSeconds: number): Promise<ApiFixture[]> {
     const fixtures = await this.staggered(
-      dates.map((date) => () => this.request<ApiFixture>("/fixtures", { date }, revalidateSeconds))
+      dates.map((date) => ({ key: `fixtures:${date}`, run: () => this.request<ApiFixture>("/fixtures", { date }, revalidateSeconds) })),
+      180,
+      // مباراة "مباشرة" في لقطة قديمة قد تكون انتهت أو لم تبدأ فعلياً الآن —
+      // لا نخدمها من الاحتياطي القديم أبداً؛ مباراة منتهية/مجدولة تبقى صحيحة.
+      (f) => isLiveApiFootballStatus(f.fixture.status.short)
     );
     return fixtures.filter((f) => CATALOG_AF_ID_SET.has(f.league.id));
   }
 
+  /** آخر نتيجة ناجحة فعلياً لكل مفتاح طلب (تاريخ/بطولة) — تبقى في ذاكرة هذه
+   * النسخة فقط (تُمسَح مع كل بداية تشغيل سيرفر جديدة، بلا تخزين دائم). تُستخدم
+   * حصراً كبديل لطلب فشل مؤقتاً، بدل إسقاط مبارياته الحقيقية بصمت. */
+  private lastGood = new Map<string, unknown[]>();
+
   /** يُشغّل عدة طلبات مع فارق زمني بسيط بين كل بداية (لا كلها دفعة واحدة)
-   * لتقليل احتمال تحديد المعدّل (Rate Limit) على الفئة المجانية، ويكمل
-   * بالنتائج الناجحة فقط بدل إسقاط كل شيء بسبب فشل طلب واحد. */
-  private async staggered<T>(tasks: Array<() => Promise<T[]>>, staggerMs = 180): Promise<T[]> {
+   * لتقليل احتمال تحديد المعدّل (Rate Limit) على الفئة المجانية. عند فشل طلب
+   * بعينه (مفتاحه) مؤقتاً، نستبدله بآخر نتيجة حقيقية ناجحة محفوظة لنفس
+   * المفتاح بدل إسقاط مبارياته — مباريات حقيقية قديمة قليلاً تبقى أفضل من
+   * اختفائها، ولسنا هنا نلجأ لبيانات مصطنعة إطلاقاً. `excludeStaleItem`
+   * اختياري: يستبعد عناصر بعينها من اللقطة القديمة قبل استخدامها (مثال
+   * وحيد فعلي: مباراة كانت "مباشرة" — حالة سريعة التغيّر لا يجوز خدمتها من
+   * ذاكرة قديمة، بخلاف مباراة منتهية/مجدولة تبقى صحيحة رغم قِدَم اللقطة). */
+  private async staggered<T>(
+    entries: Array<{ key: string; run: () => Promise<T[]> }>,
+    staggerMs = 180,
+    excludeStaleItem?: (item: T) => boolean
+  ): Promise<T[]> {
     const settled = await Promise.allSettled(
-      tasks.map(
-        (task, i) =>
+      entries.map(
+        ({ run }, i) =>
           new Promise<T[]>((resolve, reject) => {
-            setTimeout(() => task().then(resolve, reject), i * staggerMs);
+            setTimeout(() => run().then(resolve, reject), i * staggerMs);
           })
       )
     );
 
     const results: T[] = [];
-    let anySucceeded = false;
-    for (const s of settled) {
+    settled.forEach((s, i) => {
+      const { key } = entries[i];
       if (s.status === "fulfilled") {
         results.push(...s.value);
-        anySucceeded = true;
+        this.lastGood.set(key, s.value);
       } else {
-        console.error("[api-football] a staggered request failed:", s.reason);
+        console.error(`[api-football] staggered request failed for "${key}":`, s.reason);
+        const stale = this.lastGood.get(key) as T[] | undefined;
+        const reusable = stale && excludeStaleItem ? stale.filter((item) => !excludeStaleItem(item)) : stale;
+        if (reusable && reusable.length > 0) {
+          console.error(`[api-football] falling back to last known-good data for "${key}" (${reusable.length} item(s))`);
+          results.push(...reusable);
+        }
       }
-    }
+    });
 
-    // فشل كل الطلبات معاً (مثلاً Rate Limit شامل) يعني عدم توفر بيانات حقيقية
-    // إطلاقاً — نرميه كخطأ حقيقي بدل إرجاع [] بصمت (قد يُقرأ كـ "لا نتائج" بدل
-    // "تعذّر الجلب"). فشل جزئي (بعض الطلبات فقط) يبقى مقبولاً كما هو مصمَّم.
-    if (!anySucceeded && tasks.length > 0) {
+    // لا نتائج طازجة ولا أي بديل قديم محفوظ لأي مفتاح = لا بيانات حقيقية
+    // إطلاقاً — خطأ حقيقي بدل إرجاع [] بصمت (قد يُقرأ كـ "لا نتائج" بدل "تعذّر
+    // الجلب").
+    if (results.length === 0 && entries.length > 0) {
       throw new ApiFootballError("All staggered requests failed");
     }
 
@@ -125,8 +150,13 @@ export class ApiFootballProvider implements FootballProvider {
     const dates = days.map((offset) => isoDate(offset));
 
     // "week" يستهلك 7 طلبات لكل دورة تخزين مؤقت — مدة أطول تعوّض التكلفة
-    // الأعلى وتحمي حصة اليوم المجانية من النفاد بسرعة.
-    const revalidateSeconds = range === "week" ? 1800 : 600;
+    // الأعلى وتحمي حصة اليوم المجانية من النفاد بسرعة. "today" وحده قد يحوي
+    // مباراة "مباشرة" فعلياً الآن — تخزين مؤقت طويل (كان 600 ثانية) يعني أن
+    // حالتها المعروضة (مباشر/انتهت) قد تتأخر عن الواقع حتى 10 دقائق كاملة
+    // (مباراة انتهت لكن تظهر "مباشر" لدقائق). 60 ثانية هنا تطابق نفس معدّل
+    // مصدر الحقيقة الوحيد لـ"مباشر" (getLiveMatches أدناه) — لا حالة
+    // افتراضية، فقط تحديث أسرع لنفس الحقل الحقيقي القادم من المصدر.
+    const revalidateSeconds = range === "week" ? 1800 : range === "today" ? 60 : 600;
     const fixtures = await this.fetchFixturesForDates(dates, revalidateSeconds);
     return fixtures.map(mapApiFixtureToMatch);
   }
@@ -137,9 +167,10 @@ export class ApiFootballProvider implements FootballProvider {
     // البطولة أوثق من اكتشاف عبر تواريخ. نتائج منتهية لا تتغيّر بسرعة، فتخزين
     // مؤقت أطول (30 دقيقة) مقبول تماماً هنا.
     const fixtures = await this.staggered(
-      CATALOG_AF_IDS.map(
-        (league) => () => this.request<ApiFixture>("/fixtures", { league, season: CURRENT_SEASON, last: 5 }, 1800)
-      )
+      CATALOG_AF_IDS.map((league) => ({
+        key: `results:${league}`,
+        run: () => this.request<ApiFixture>("/fixtures", { league, season: CURRENT_SEASON, last: 5 }, 1800),
+      }))
     );
     return fixtures
       .map(mapApiFixtureToMatch)
@@ -175,7 +206,7 @@ export class ApiFootballProvider implements FootballProvider {
     // الأسبوع تحديداً أو لا (كأس قد يكون بين جولتين)، بلا اكتشاف عشوائي من
     // نتائج مباريات قد يُدخل بطولات غير مهمة لمجرد أن لها مباراة اليوم.
     const entries = await this.staggered(
-      CATALOG_AF_IDS.map((id) => () => this.request<ApiLeague>("/leagues", { id }, 3600))
+      CATALOG_AF_IDS.map((id) => ({ key: `competition:${id}`, run: () => this.request<ApiLeague>("/leagues", { id }, 3600) }))
     );
     return entries.map(mapApiLeagueToCompetition);
   }

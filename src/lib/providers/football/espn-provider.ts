@@ -1,6 +1,6 @@
 import type { FootballProvider } from "./types";
 import type { Competition, Match, MatchEvent, MatchStatLine, StandingsEntry, TeamLineup } from "@/lib/types";
-import type { EspnScoreboardResponse, EspnSummaryResponse, EspnStandingEntry } from "./espn-types";
+import type { EspnEvent, EspnScoreboardResponse, EspnSummaryResponse, EspnStandingEntry } from "./espn-types";
 import {
   mapEspnBoxscoreToStats,
   mapEspnEventToMatch,
@@ -107,6 +107,12 @@ export async function getEspnEnrichment(
 }
 
 export class EspnProvider implements FootballProvider {
+  /** آخر أحداث ناجحة فعلياً لكل مفتاح (دوري+تاريخ) — بنفس منطق مزوّدَي
+   * API-Football وTheSportsDB: بديل لطلب فشل مؤقتاً بدل إسقاط مبارياته
+   * الحقيقية، مع استبعاد أي حدث كان "مباشراً" وقت الالتقاط (حالة سريعة
+   * التغيّر لا يجوز خدمتها من ذاكرة قديمة). */
+  private lastGoodEvents = new Map<string, EspnEvent[]>();
+
   async getLiveMatches(): Promise<Match[]> {
     const results = await Promise.allSettled(
       FEATURED_SLUGS.map((slug) => fetchJson<EspnScoreboardResponse>(`${BASE_URL}/${slug}/scoreboard`, 60))
@@ -134,28 +140,44 @@ export class EspnProvider implements FootballProvider {
       d.setDate(d.getDate() + offset);
       return d.toISOString().slice(0, 10).replace(/-/g, "");
     });
+    // "today" وحده قد يحوي مباراة مباشرة فعلياً الآن — نفس تشديد التخزين
+    // المؤقت المطبَّق في مزوّدَي API-Football وTheSportsDB (60 ثانية بدل 600).
+    const revalidateSeconds = range === "today" ? 60 : 600;
 
-    const tasks = FEATURED_SLUGS.flatMap((slug) =>
-      dates.map((date) => () => fetchJson<EspnScoreboardResponse>(`${BASE_URL}/${slug}/scoreboard?dates=${date}`, 600))
+    const requests = FEATURED_SLUGS.flatMap((slug) =>
+      dates.map((date) => ({
+        key: `${slug}:${date}`,
+        slug,
+        run: () => fetchJson<EspnScoreboardResponse>(`${BASE_URL}/${slug}/scoreboard?dates=${date}`, revalidateSeconds),
+      }))
     );
-    const results = await Promise.allSettled(tasks.map((t) => t()));
+    const settled = await Promise.allSettled(requests.map((r) => r.run()));
 
     const matches: Match[] = [];
     let anySucceeded = false;
-    let taskIndex = 0;
-    for (const slug of FEATURED_SLUGS) {
-      for (const _date of dates) {
-        const r = results[taskIndex++];
-        if (r.status === "fulfilled") {
-          anySucceeded = true;
-          for (const event of r.value.events ?? []) {
+    settled.forEach((r, i) => {
+      const { key, slug } = requests[i];
+      if (r.status === "fulfilled") {
+        anySucceeded = true;
+        const events = r.value.events ?? [];
+        this.lastGoodEvents.set(key, events);
+        for (const event of events) {
+          const m = mapEspnEventToMatch(event, slug);
+          if (m) matches.push(m);
+        }
+      } else {
+        console.error(`[espn] date-range request failed for "${key}":`, r.reason);
+        const stale = this.lastGoodEvents.get(key);
+        if (stale) {
+          for (const event of stale) {
+            if (event.status.type.state === "in") continue; // مباشر وقت الالتقاط — لا يُخدَم من ذاكرة قديمة
             const m = mapEspnEventToMatch(event, slug);
             if (m) matches.push(m);
           }
         }
       }
-    }
-    if (!anySucceeded) throw new EspnError("All ESPN date-range requests failed");
+    });
+    if (matches.length === 0 && !anySucceeded) throw new EspnError("All ESPN date-range requests failed");
     return matches;
   }
 

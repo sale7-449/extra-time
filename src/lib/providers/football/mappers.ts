@@ -51,6 +51,14 @@ const STATUS_MAP: Record<string, MatchStatus> = {
   WO: "CANCELLED",
 };
 
+/** يُستخدَم لاستبعاد مباراة كانت "مباشرة" وقت آخر جلب ناجح من احتياطي
+ * staggered() القديم (راجع api-football-provider.ts) — حالة كهذه سريعة
+ * التغيّر جداً (قد تنتهي أو تبدأ خلال دقائق) ولا يجوز خدمتها من لقطة قديمة،
+ * بخلاف مباراة منتهية/مجدولة تبقى صحيحة رغم قِدَم اللقطة. */
+export function isLiveApiFootballStatus(code: string): boolean {
+  return STATUS_MAP[code] === "LIVE";
+}
+
 const EVENT_TYPE_MAP: Record<string, MatchEventType> = {
   Goal: "GOAL",
   subst: "SUBSTITUTION",

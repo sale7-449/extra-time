@@ -27,6 +27,14 @@ const STATUS_MAP: Record<string, MatchStatus> = {
   ABD: "CANCELLED",
 };
 
+/** نظير isLiveApiFootballStatus (مزوّد API-Football) — يستبعد مباراة كانت
+ * "مباشرة" وقت آخر جلب ناجح من احتياطي staggered() القديم في
+ * thesportsdb-provider.ts؛ حالة "مباشر" وحدها سريعة التغيّر بما يمنع خدمتها
+ * من لقطة قديمة. */
+export function isLiveTsdbStatus(code: string | null | undefined): boolean {
+  return STATUS_MAP[code ?? "NS"] === "LIVE";
+}
+
 function toTeam(id: string, name: string, badge: string | null): Team {
   return {
     id: tagId("tsdb", id),

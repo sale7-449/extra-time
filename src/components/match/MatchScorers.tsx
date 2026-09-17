@@ -5,20 +5,25 @@ import { eventTimeValue, formatEventMinute } from "@/lib/match-events";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 
 interface ScorerLine {
+  key: string;
   playerName: string;
   goals: MatchEvent[];
 }
 
 /** يُجمِّع أهداف نفس اللاعب في سطر واحد (مثال: "رافينيا 12', 47'")، ويرتّب
- * اللاعبين حسب أول هدف سجّله زمنياً — لا حسب الأبجدية. */
+ * اللاعبين حسب أول هدف سجّله زمنياً — لا حسب الأبجدية. التجميع بمعرّف اللاعب
+ * الحقيقي (playerId) عند توفره، لا بنص الاسم المعروض فقط — أكثر من هدف بلا
+ * اسم مسجَّل من المصدر كان يظهر جميعه بنفس النص البديل ("—")، فيدمج المنطق
+ * القديم أهداف لاعبين مختلفين فعلياً في سطر واحد خاطئ. */
 function groupScorers(events: MatchEvent[], teamId: string): ScorerLine[] {
   const goals = events.filter((e) => e.type === "GOAL" && e.teamId === teamId);
   const byPlayer = new Map<string, ScorerLine>();
 
   for (const goal of goals) {
-    const existing = byPlayer.get(goal.playerName);
+    const key = goal.playerId ?? `name:${goal.playerName}`;
+    const existing = byPlayer.get(key);
     if (existing) existing.goals.push(goal);
-    else byPlayer.set(goal.playerName, { playerName: goal.playerName, goals: [goal] });
+    else byPlayer.set(key, { key, playerName: goal.playerName, goals: [goal] });
   }
 
   return [...byPlayer.values()].sort((a, b) => {
@@ -42,7 +47,7 @@ export function MatchScorers({ events, teamId }: { events: MatchEvent[]; teamId:
   return (
     <ul className="mt-1 space-y-0.5 text-center">
       {scorers.map((scorer) => (
-        <li key={scorer.playerName} className="text-xs text-muted-dim leading-snug">
+        <li key={scorer.key} className="text-xs text-muted-dim leading-snug">
           <span className="font-bold text-muted">{scorer.playerName}</span>{" "}
           <span className="tabular" dir="ltr">
             {scorer.goals.map((g, i) => (

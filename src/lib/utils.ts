@@ -1,5 +1,35 @@
 import { messages, type Locale } from "@/lib/i18n/messages";
 
+/** توقيت الرياض — المنطقة الزمنية المرجعية لتجميع مباريات الأسبوع حسب
+ * اليوم، بمعزل تماماً عن توقيت تشغيل خادم Vercel نفسه (غالباً UTC) أو توقيت
+ * متصفح الزائر — نفس اليوم التقويمي لكل الزوار بلا استثناء. */
+const DISPLAY_TZ = "Asia/Riyadh";
+
+/** مفتاح اليوم التقويمي (YYYY-MM-DD) بتوقيت الرياض — أساس تجميع مباريات
+ * الأسبوع، لا مقارنة تواريخ خام قد تختلف بفارق ساعات المنطقة الزمنية. */
+export function dayKeyInDisplayTz(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: DISPLAY_TZ });
+}
+
+/** عنوان يوم مباريات الأسبوع: "اليوم — الخميس ١٧ سبتمبر" لأول يوم، "غداً —
+ * ..." لليوم التالي، واسم اليوم والتاريخ فقط لما بعدهما — كله بتوقيت الرياض. */
+export function formatWeekDayHeading(iso: string, locale: Locale, todayLabel: string, tomorrowLabel: string): string {
+  const key = dayKeyInDisplayTz(iso);
+  const todayKey = dayKeyInDisplayTz(new Date().toISOString());
+  const tomorrowKey = dayKeyInDisplayTz(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+
+  const weekdayDate = new Date(iso).toLocaleDateString(locale === "ar" ? "ar-SA" : "en-US", {
+    timeZone: DISPLAY_TZ,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+
+  if (key === todayKey) return `${todayLabel} — ${weekdayDate}`;
+  if (key === tomorrowKey) return `${tomorrowLabel} — ${weekdayDate}`;
+  return weekdayDate;
+}
+
 export function formatKickoffTime(iso: string, locale: Locale = "ar"): string {
   return new Date(iso).toLocaleTimeString(locale === "ar" ? "ar-SA" : "en-US", {
     hour: "2-digit",

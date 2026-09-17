@@ -57,7 +57,8 @@ export const messages = {
       viewAll: "عرض الكل",
       notAvailable: "غير متوفر",
       loading: "جارٍ التحميل…",
-      vs: "ضد",
+      // "VS" ثابتة بلا ترجمة في كلا اللغتين عمداً — طلب صريح لاستبدال "ضد".
+      vs: "VS",
       share: "مشاركة",
       logout: "تسجيل الخروج",
       login: "تسجيل الدخول",
@@ -481,7 +482,7 @@ export const messages = {
       viewAll: "View all",
       notAvailable: "Not available",
       loading: "Loading…",
-      vs: "vs",
+      vs: "VS",
       share: "Share",
       logout: "Log out",
       login: "Log in",

@@ -2,6 +2,7 @@ import type { FootballProvider } from "./types";
 import type { Competition, Match, StandingsEntry } from "@/lib/types";
 import type { TsdbEvent, TsdbLeague, TsdbLineupRow, TsdbStandingRow } from "./thesportsdb-types";
 import {
+  isLiveTsdbStatus,
   mapTsdbEventToMatch,
   mapTsdbLeagueToCompetition,
   mapTsdbLineupToLineups,
@@ -48,22 +49,37 @@ export class TheSportsDbProvider implements FootballProvider {
     }
   }
 
-  private async staggered<T>(tasks: Array<() => Promise<T[]>>, staggerMs = 150): Promise<T[]> {
+  /** آخر نتيجة ناجحة فعلياً لكل مفتاح طلب (بطولة) — بنفس منطق مزوّد
+   * API-Football: تُستخدم كبديل لطلب فشل مؤقتاً بدل إسقاط مبارياته الحقيقية. */
+  private lastGood = new Map<string, unknown[]>();
+
+  private async staggered<T>(
+    entries: Array<{ key: string; run: () => Promise<T[]> }>,
+    staggerMs = 150,
+    excludeStaleItem?: (item: T) => boolean
+  ): Promise<T[]> {
     const settled = await Promise.allSettled(
-      tasks.map((task, i) => new Promise<T[]>((resolve, reject) => setTimeout(() => task().then(resolve, reject), i * staggerMs)))
+      entries.map(({ run }, i) => new Promise<T[]>((resolve, reject) => setTimeout(() => run().then(resolve, reject), i * staggerMs)))
     );
 
     const results: T[] = [];
-    let anySucceeded = false;
-    for (const s of settled) {
+    settled.forEach((s, i) => {
+      const { key } = entries[i];
       if (s.status === "fulfilled") {
         results.push(...s.value);
-        anySucceeded = true;
+        this.lastGood.set(key, s.value);
       } else {
-        console.error("[thesportsdb] a staggered request failed:", s.reason);
+        console.error(`[thesportsdb] staggered request failed for "${key}":`, s.reason);
+        const stale = this.lastGood.get(key) as T[] | undefined;
+        const reusable = stale && excludeStaleItem ? stale.filter((item) => !excludeStaleItem(item)) : stale;
+        if (reusable && reusable.length > 0) {
+          console.error(`[thesportsdb] falling back to last known-good data for "${key}" (${reusable.length} item(s))`);
+          results.push(...reusable);
+        }
       }
-    }
-    if (!anySucceeded && tasks.length > 0) throw new TheSportsDbError("All staggered requests failed");
+    });
+
+    if (results.length === 0 && entries.length > 0) throw new TheSportsDbError("All staggered requests failed");
     return results;
   }
 
@@ -73,9 +89,17 @@ export class TheSportsDbProvider implements FootballProvider {
   }
 
   async getMatchesByDateRange(range: "today" | "tomorrow" | "week"): Promise<Match[]> {
-    const revalidateSeconds = range === "week" ? 1800 : 600;
+    // نفس منطق مزوّد API-Football: "today" وحده قد يحوي مباراة مباشرة فعلياً
+    // الآن، فتخزين مؤقت أقصر (60 ثانية بدل 600) يمنع بقاء حالة "مباشر"
+    // ظاهرة لدقائق بعد انتهاء المباراة فعلياً.
+    const revalidateSeconds = range === "week" ? 1800 : range === "today" ? 60 : 600;
     const rows = await this.staggered(
-      CATALOG_TSDB_IDS.map((id) => () => this.request<TsdbEvent>("/eventsnextleague.php", { id }, revalidateSeconds))
+      CATALOG_TSDB_IDS.map((id) => ({
+        key: `nextleague:${id}`,
+        run: () => this.request<TsdbEvent>("/eventsnextleague.php", { id }, revalidateSeconds),
+      })),
+      150,
+      (e) => isLiveTsdbStatus(e.strStatus)
     );
 
     const today = new Date();
@@ -94,7 +118,7 @@ export class TheSportsDbProvider implements FootballProvider {
 
   async getRecentResults(): Promise<Match[]> {
     const rows = await this.staggered(
-      CATALOG_TSDB_IDS.map((id) => () => this.request<TsdbEvent>("/eventspastleague.php", { id }, 1800))
+      CATALOG_TSDB_IDS.map((id) => ({ key: `pastleague:${id}`, run: () => this.request<TsdbEvent>("/eventspastleague.php", { id }, 1800) }))
     );
     return rows
       .map(mapTsdbEventToMatch)
@@ -119,7 +143,7 @@ export class TheSportsDbProvider implements FootballProvider {
 
   async getCompetitions(): Promise<Competition[]> {
     const entries = await this.staggered(
-      CATALOG_TSDB_IDS.map((id) => () => this.request<TsdbLeague>("/lookupleague.php", { id }, 3600))
+      CATALOG_TSDB_IDS.map((id) => ({ key: `league:${id}`, run: () => this.request<TsdbLeague>("/lookupleague.php", { id }, 3600) }))
     );
     return entries.map(mapTsdbLeagueToCompetition);
   }

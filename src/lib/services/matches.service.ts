@@ -69,9 +69,26 @@ async function localizeMatches(matches: Match[]): Promise<Match[]> {
   }));
 }
 
+// أطول مدة واقعية لمباراة كرة قدم (شوطان + إضافي + وقت إضافي + ركلات ترجيح
+// + توقفات) — لا تتجاوز 3 ساعات فعلياً مهما حدث. مصادر البيانات (خصوصاً
+// المفتاح العام المجاني لـTheSportsDB) تُبقي أحياناً مباراة منتهية فعلياً
+// عالقة بحالة "مباشر" لساعات (توقّف تحديث من المصدر نفسه، لا خطأ في كودنا).
+// هذا ليس تخميناً لنتيجة جديدة — النتيجة المعروضة تبقى نفسها القادمة من
+// المصدر حرفياً، فقط تصنيف "مباشر/منتهية" يُصحَّح استناداً لوقت الانطلاق
+// الحقيقي مقابل الوقت الحالي، تماماً كما هي حالته الفعلية.
+const MAX_LIVE_MATCH_MS = 3 * 60 * 60 * 1000;
+
+function reconcileStaleLiveStatus(match: Match): Match {
+  if (match.status !== "LIVE") return match;
+  const elapsedMs = Date.now() - new Date(match.kickoff).getTime();
+  if (elapsedMs <= MAX_LIVE_MATCH_MS) return match;
+  return { ...match, status: "FINISHED", minute: undefined };
+}
+
 async function resolveMatches(fetcher: () => Promise<Match[]>): Promise<MatchesResult> {
   try {
-    return { matches: await localizeMatches(await fetcher()), unavailable: false };
+    const matches = (await fetcher()).map(reconcileStaleLiveStatus);
+    return { matches: await localizeMatches(matches), unavailable: false };
   } catch (error) {
     if (error instanceof RealDataUnavailableError) return { matches: [], unavailable: true };
     throw error;
@@ -94,7 +111,7 @@ export async function getMatch(id: string): Promise<MatchResult> {
   try {
     const match = await footballProvider.getMatchById(id);
     if (!match) return { match: null, unavailable: false };
-    const [localized] = await localizeMatches([match]);
+    const [localized] = await localizeMatches([reconcileStaleLiveStatus(match)]);
     return { match: localized, unavailable: false };
   } catch (error) {
     if (error instanceof RealDataUnavailableError) return { match: null, unavailable: true };
