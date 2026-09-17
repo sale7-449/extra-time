@@ -6,18 +6,20 @@ import { getMatch, getUpcomingMatches, getRecentResults } from "@/lib/services/m
 import {
   toNewsContentItem,
   toVideoContentItem,
+  toManualVideoContentItem,
   toMatchResultContentItem,
   toGoalContentItem,
-  toMatchSummaryContentItem,
+  toMatchSummaryBaseContent,
   toImageContentItem,
 } from "@/lib/providers/social/content-builders";
 import { encodeNewsId } from "@/lib/news-id";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
 import type { ContentItem, Attachment } from "@/lib/providers/social/types";
-import type { Match } from "@/lib/types";
+import type { Match, Team } from "@/lib/types";
 import { getAdminSession } from "@/lib/admin/session";
 import {
   listContentDrafts,
+  getContentDraft,
   createContentDraft,
   updateContentDraft,
   publishContentDraft,
@@ -25,6 +27,7 @@ import {
   type ContentDraft,
   type ContentDraftKind,
   type ContentDestination,
+  type SubjectType,
 } from "@/lib/admin/content-drafts";
 
 /** رابط مطبَّع للمقارنة — نفس منطق news.service.ts (غير مُصدَّر هناك، فكُرِّر
@@ -120,9 +123,10 @@ export async function fetchAdminContent(input: {
 }
 
 /**
- * Content Studio — الموجة الأولى من المصادر الحرة: NEWS/IMAGE (يدوي أو رابط)
- * وMATCH_RESULT/GOAL/MATCH_SUMMARY (من مباراة حقيقية). كل دالة هنا تتحقّق من
- * جلسة Admin بنفسها (لا تعتمد على حماية الصفحة وحدها) — Server Actions
+ * Content Studio — تصميم Subject/Entity الرسمي: كل محتوى مرتبط بموضوع
+ * (مباراة/نادٍ/بطولة/خبر عام/عام) عبر subjectType+subjectId، لا عبر
+ * sourceType (الذي يبقى لتوثيق منشأ النص التحريري فقط). كل دالة هنا تتحقّق
+ * من جلسة Admin بنفسها (لا تعتمد على حماية الصفحة وحدها) — Server Actions
  * قابلة للاستدعاء المباشر بمعزل عن الصفحة التي عرضت الزر.
  */
 
@@ -141,7 +145,7 @@ export async function listContentDraftsAction(): Promise<ContentDraft[]> {
 
 /** استيراد خبر من رابط — بنفس آلية fetchAdminContent أعلاه بالضبط (مطابقة
  * ضمن مجمّع RSS الحقيقي المُهيَّأ أصلاً، لا جلب/scraping لرابط عام). يبقى
- * NEWS فقط — استيراد الرابط العام خارج نطاق هذه الموجة. */
+ * NEWS فقط، subjectType=NEWS دائماً — استيراد الرابط العام خارج النطاق حالياً. */
 export async function createNewsDraftFromUrlAction(input: {
   newsUrl: string;
   destinations: ContentDestination[];
@@ -162,6 +166,7 @@ export async function createNewsDraftFromUrlAction(input: {
     kind: "NEWS",
     sourceType: "URL",
     sourceRef: newsUrl,
+    subjectType: "NEWS",
     baseContent,
     destinations: input.destinations,
     createdBy,
@@ -170,19 +175,29 @@ export async function createNewsDraftFromUrlAction(input: {
   return { draft };
 }
 
-/** إنشاء خبر أو صورة يدوياً — لا مصدر خارجي. صورة تتطلّب رابط صورة حقيقياً
- * (لا معنى لعنصر IMAGE بلا صورة). */
+/**
+ * إنشاء يدوي عام — NEWS/IMAGE/VIDEO، مرتبط اختيارياً بموضوع حقيقي (نادٍ/
+ * بطولة/مباراة) عبر subjectType+subjectId، أو غير مرتبط (NEWS/GENERAL).
+ * المحتوى التحريري بالكامل (عنوان/ملخص/صورة/فيديو) يُخزَّن كما هو — لا بيانات
+ * رياضية تُنسَخ هنا؛ subjectId مجرّد مرجع، لا مصدر بيانات.
+ */
 export async function createManualDraftAction(input: {
-  kind: "NEWS" | "IMAGE";
+  kind: "NEWS" | "IMAGE" | "VIDEO";
+  subjectType: SubjectType;
+  subjectId?: string | null;
   title: string;
   summary: string;
   imageUrl: string;
+  videoUrl?: string;
   destinations: ContentDestination[];
 }): Promise<DraftActionResult> {
   const createdBy = await requireAdminUsername();
   const title = input.title.trim();
   if (!title) return { error: "empty" };
   if (input.destinations.length === 0) return { error: "no_destination" };
+  if ((input.subjectType === "TEAM" || input.subjectType === "COMPETITION" || input.subjectType === "MATCH") && !input.subjectId) {
+    return { error: "subject_required" };
+  }
 
   const locale = await getServerLocale();
   let baseContent: ContentItem | null;
@@ -190,6 +205,14 @@ export async function createManualDraftAction(input: {
   if (input.kind === "IMAGE") {
     baseContent = toImageContentItem({ title, imageUrl: input.imageUrl, caption: input.summary.trim() || undefined });
     if (!baseContent) return { error: "image_required" };
+  } else if (input.kind === "VIDEO") {
+    baseContent = toManualVideoContentItem({
+      title,
+      videoUrl: input.videoUrl ?? "",
+      imageUrl: input.imageUrl,
+      caption: input.summary.trim() || undefined,
+    });
+    if (!baseContent) return { error: "video_required" };
   } else {
     baseContent = {
       id: "manual-pending",
@@ -207,6 +230,8 @@ export async function createManualDraftAction(input: {
     kind: input.kind,
     sourceType: "MANUAL",
     sourceRef: null,
+    subjectType: input.subjectType,
+    subjectId: input.subjectId ?? null,
     baseContent,
     destinations: input.destinations,
     createdBy,
@@ -215,8 +240,31 @@ export async function createManualDraftAction(input: {
   return { draft };
 }
 
-/** بحث مباريات حقيقية (نتائج أخيرة + مباريات الأسبوع) لمحرّر المباراة — نفس
- * آلية substring المستخدَمة في /search، بلا provider جديد. */
+/** مجموعات المباريات الحقيقية الثلاث لواجهة "مباريات" — نفس الخدمات
+ * المستخدَمة أصلاً في /matches، بلا provider جديد. */
+export interface MatchGroups {
+  today: Match[];
+  upcoming: Match[];
+  recent: Match[];
+}
+
+export async function listMatchGroupsAction(): Promise<MatchGroups> {
+  await requireAdminUsername();
+  const [todayResult, weekResult, recentResult] = await Promise.all([
+    getUpcomingMatches("today"),
+    getUpcomingMatches("week"),
+    getRecentResults(),
+  ]);
+  const todayIds = new Set(todayResult.matches.map((m) => m.id));
+  return {
+    today: todayResult.matches,
+    upcoming: weekResult.matches.filter((m) => !todayIds.has(m.id)),
+    recent: recentResult.matches,
+  };
+}
+
+/** بحث مباريات حقيقية (نتائج أخيرة + مباريات الأسبوع) — نفس آلية substring
+ * المستخدَمة في /search، بلا provider جديد. */
 export async function searchMatchesAction(query: string): Promise<Match[]> {
   await requireAdminUsername();
   const q = query.trim().toLowerCase();
@@ -235,20 +283,46 @@ export async function searchMatchesAction(query: string): Promise<Match[]> {
   return matches.slice(0, 20);
 }
 
-/** تفاصيل مباراة كاملة (بأحداثها) بعد اختيارها من نتائج البحث — getMatch
- * (خلافاً لقوائم البحث) يجلب الأحداث الحقيقية أيضاً. لا تعديل على المباراة
- * نفسها هنا إطلاقاً — للعرض فقط. */
+/** بحث أندية حقيقية — تُستخلَص من نفس تجمّع المباريات (لا دليل أندية مستقل
+ * في المنصة بعد) — نادٍ بلا أي مباراة ضمن هذه النافذة الزمنية لن يظهر بعد،
+ * قيد بيانات حقيقي لا نتغلّب عليه باختلاق نادٍ. */
+export async function searchTeamsAction(query: string): Promise<Team[]> {
+  await requireAdminUsername();
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+
+  const [recent, week] = await Promise.all([getRecentResults(), getUpcomingMatches("week")]);
+  const seen = new Set<string>();
+  const teams: Team[] = [];
+  for (const m of [...recent.matches, ...week.matches]) {
+    for (const team of [m.homeTeam, m.awayTeam]) {
+      if (seen.has(team.id) || !team.name.toLowerCase().includes(q)) continue;
+      seen.add(team.id);
+      teams.push(team);
+    }
+  }
+  return teams.slice(0, 20);
+}
+
+/** تفاصيل مباراة كاملة (بأحداثها) بعد اختيارها — getMatch (خلافاً لقوائم
+ * البحث/المجموعات) يجلب الأحداث الحقيقية أيضاً. للعرض فقط — لا تعديل على
+ * المباراة نفسها هنا إطلاقاً. */
 export async function getMatchDetailAction(matchId: string): Promise<Match | null> {
   await requireAdminUsername();
   const { match } = await getMatch(matchId);
   return match;
 }
 
-/** إنشاء Draft من مباراة حقيقية — MATCH_RESULT (نتيجة نهائية فقط)، GOAL
- * (حدث هدف حقيقي من أحداث المباراة)، أو MATCH_SUMMARY (نص تحريري من
- * المحرِّر مربوط ببيانات المباراة الحقيقية). لا تعديل على بيانات المباراة
- * الأصلية بأي شكل — أي نص تحريري لاحق يذهب إلى overrides عبر updateDraftAction. */
-export async function createMatchDraftAction(input: {
+/**
+ * إنشاء Draft مرتبط بمباراة حقيقية بأحد الأنواع الرياضية الثلاثة —
+ * MATCH_RESULT (نتيجة نهائية فقط)، GOAL (حدث هدف حقيقي موثَّق)، أو
+ * MATCH_SUMMARY (نص تحريري + بيانات المباراة). لا تُنسَخ بيانات المباراة هنا
+ * كحقيقة دائمة — baseContent المُخزَّن أدنى (placeholder)، والبيانات
+ * الرياضية الفعلية تُحَل حيّة عند كل معاينة/نشر عبر getResolvedSubjectBaseAction
+ * أدناه. النص التحريري لملخص المباراة يُخزَّن في overrides مباشرة، لا في
+ * baseContent. لا تعديل على بيانات المباراة الأصلية بأي شكل.
+ */
+export async function createMatchSportDraftAction(input: {
   kind: "MATCH_RESULT" | "GOAL" | "MATCH_SUMMARY";
   matchId: string;
   eventId?: string;
@@ -262,31 +336,71 @@ export async function createMatchDraftAction(input: {
   const { match } = await getMatch(input.matchId);
   if (!match) return { error: "match_not_found" };
 
-  let baseContent: ContentItem | null;
+  let subjectEventId: string | null = null;
+  let overrides: Partial<ContentItem> | undefined;
+  let placeholderTitle: string;
+
   if (input.kind === "MATCH_RESULT") {
-    baseContent = toMatchResultContentItem(match);
-    if (!baseContent) return { error: "match_not_finished" };
+    if (!toMatchResultContentItem(match)) return { error: "match_not_finished" };
+    placeholderTitle = `${match.homeTeam.name} × ${match.awayTeam.name}`;
   } else if (input.kind === "GOAL") {
     const event = match.events.find((e) => e.id === input.eventId);
     if (!event) return { error: "event_not_found" };
-    baseContent = toGoalContentItem(match, event);
-    if (!baseContent) return { error: "goal_data_incomplete" };
+    if (!toGoalContentItem(match, event)) return { error: "goal_data_incomplete" };
+    subjectEventId = event.id;
+    placeholderTitle = `${match.homeTeam.name} × ${match.awayTeam.name}`;
   } else {
     const title = input.title?.trim();
     if (!title) return { error: "empty" };
-    baseContent = toMatchSummaryContentItem(match, { title, summary: input.summary?.trim() });
+    overrides = { title, summary: input.summary?.trim() || undefined };
+    placeholderTitle = title;
   }
+
+  const baseContent: ContentItem = {
+    id: `${input.kind.toLowerCase()}-${match.id}`,
+    kind: input.kind,
+    title: placeholderTitle,
+    publishedAt: match.kickoff,
+  };
 
   const draft = await createContentDraft({
     kind: input.kind as ContentDraftKind,
-    sourceType: "MATCH",
-    sourceRef: input.matchId,
+    sourceType: "MANUAL",
+    sourceRef: null,
+    subjectType: "MATCH",
+    subjectId: input.matchId,
+    subjectEventId,
     baseContent,
+    overrides,
     destinations: input.destinations,
     createdBy,
   });
   if (!draft) return { error: "create_failed" };
   return { draft };
+}
+
+/**
+ * البيانات الرياضية الحيّة الحالية لمسودة مرتبطة بمباراة (MATCH_RESULT/GOAL/
+ * MATCH_SUMMARY) — تُجلَب من جديد من مزوّد المباريات في كل استدعاء، لا من
+ * baseContent المخزَّن. هذا هو "base" الفعلي الذي يُمرَّر لـresolveContentItem
+ * وقت المعاينة/النشر؛ null إن لم تعد المباراة متاحة أو المحتوى غير مرتبط
+ * بمباراة أصلاً (عندها base_content المخزَّن يبقى المرجع الوحيد المتاح).
+ */
+export async function getResolvedSubjectBaseAction(draftId: string): Promise<ContentItem | null> {
+  await requireAdminUsername();
+  const draft = await getContentDraft(draftId);
+  if (!draft || draft.subjectType !== "MATCH" || !draft.subjectId) return null;
+
+  const { match } = await getMatch(draft.subjectId);
+  if (!match) return null;
+
+  if (draft.kind === "MATCH_RESULT") return toMatchResultContentItem(match);
+  if (draft.kind === "GOAL") {
+    const event = match.events.find((e) => e.id === draft.subjectEventId);
+    return event ? toGoalContentItem(match, event) : null;
+  }
+  if (draft.kind === "MATCH_SUMMARY") return toMatchSummaryBaseContent(match);
+  return null;
 }
 
 /** تحديث عام يعمل لأي نوع Draft — الحقول (عنوان/ملخص/صورة/مرفقات/وجهة) نفسها

@@ -5,6 +5,8 @@ import Image from "next/image";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { cx, formatKickoffTime } from "@/lib/utils";
 import { localizeCompetitionShortName } from "@/lib/i18n/localized-names";
+import { COMPETITION_CATALOG } from "@/lib/providers/football/competition-catalog";
+import { tagId } from "@/lib/providers/football/ids";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -15,20 +17,24 @@ import { resolveContentItem } from "@/lib/providers/social/content-builders";
 import {
   createNewsDraftFromUrlAction,
   createManualDraftAction,
-  createMatchDraftAction,
+  createMatchSportDraftAction,
   updateDraftAction,
   publishDraftAction,
   archiveDraftAction,
+  listMatchGroupsAction,
   searchMatchesAction,
+  searchTeamsAction,
   getMatchDetailAction,
+  getResolvedSubjectBaseAction,
+  type MatchGroups,
 } from "@/lib/actions/admin-content.actions";
-import type { ContentDraft, ContentDestination, ContentDraftKind } from "@/lib/admin/content-drafts";
-import type { Attachment } from "@/lib/providers/social/types";
-import type { Match, MatchEvent } from "@/lib/types";
+import type { ContentDraft, ContentDestination, ContentDraftKind, SubjectType } from "@/lib/admin/content-drafts";
+import type { ContentItem, Attachment } from "@/lib/providers/social/types";
+import type { Match, MatchEvent, Team } from "@/lib/types";
 
-type CreateTab = "url" | "manual" | "match";
-type ManualKind = "NEWS" | "IMAGE";
-type MatchContentKind = "MATCH_RESULT" | "GOAL" | "MATCH_SUMMARY";
+type ManualKind = "NEWS" | "IMAGE" | "VIDEO";
+type MatchSportKind = "MATCH_RESULT" | "GOAL" | "MATCH_SUMMARY";
+type NewsCreateMode = "url" | "manual";
 
 /** يُطبَّع دائماً إلى إحدى 3 حالات: SITE فقط / SNAPCHAT فقط / كلاهما — يطابق
  * قيد قاعدة البيانات (destinations <@ ['SITE','SNAPCHAT']) بلا أي قيمة أخرى. */
@@ -102,6 +108,37 @@ function useKindLabel() {
 const textareaClass =
   "w-full rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3.5 py-2.5 text-sm text-ink placeholder:text-muted-dim outline-none transition-colors focus:border-primary/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary";
 
+const pillClass = (active: boolean) =>
+  cx(
+    "h-9 px-4 rounded-[var(--radius-sm)] border text-sm font-bold disabled:opacity-40 transition-colors",
+    active ? "border-primary text-primary bg-primary/10" : "border-border text-muted hover:border-primary/30"
+  );
+
+function MatchRow({ m, locale, onSelect }: { m: Match; locale: "ar" | "en"; onSelect: (m: Match) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(m)}
+      className="w-full text-start rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-bold">
+          {m.homeTeam.name} × {m.awayTeam.name}
+        </span>
+        <MatchStatusBadge status={m.status} minute={m.minute} />
+      </div>
+      <span className="text-xs text-muted-dim">
+        {localizeCompetitionShortName(m.competitionId, locale) ?? ""} · {formatKickoffTime(m.kickoff, locale)}
+      </span>
+    </button>
+  );
+}
+
+const CATALOG_COMPETITIONS = COMPETITION_CATALOG.filter((e) => e.afId !== undefined).map((e) => ({
+  id: tagId("af", e.afId!),
+  fallback: String(e.afId),
+}));
+
 export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentDraft[] }) {
   const { t, locale } = useLocale();
   const kindLabel = useKindLabel();
@@ -110,31 +147,44 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const activeDraft = drafts.find((d) => d.id === activeDraftId) ?? null;
 
-  // تبويب الإنشاء
-  const [createTab, setCreateTab] = useState<CreateTab>("url");
+  // اختيار الموضوع
+  const [subject, setSubject] = useState<SubjectType | null>(null);
   const [createDestinations, setCreateDestinations] = useState<ContentDestination[]>(["SITE"]);
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  // استيراد من رابط
+  // أخبار: استيراد من رابط أو يدوي (NEWS فقط)
+  const [newsMode, setNewsMode] = useState<NewsCreateMode>("url");
   const [importUrl, setImportUrl] = useState("");
 
-  // إنشاء يدوي (خبر/صورة)
+  // نموذج يدوي مشترك (عام / أندية / بطولات / مباريات→NEWS-IMAGE-VIDEO)
   const [manualKind, setManualKind] = useState<ManualKind>("NEWS");
   const [manualTitle, setManualTitle] = useState("");
   const [manualSummary, setManualSummary] = useState("");
   const [manualImage, setManualImage] = useState("");
+  const [manualVideoUrl, setManualVideoUrl] = useState("");
 
-  // من مباراة
+  // مباريات
+  const [matchGroups, setMatchGroups] = useState<MatchGroups | null>(null);
+  const [matchGroupsLoading, setMatchGroupsLoading] = useState(false);
   const [matchQuery, setMatchQuery] = useState("");
   const [matchSearching, setMatchSearching] = useState(false);
-  const [matchResults, setMatchResults] = useState<Match[]>([]);
+  const [matchSearchResults, setMatchSearchResults] = useState<Match[] | null>(null);
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [matchDetailLoading, setMatchDetailLoading] = useState(false);
-  const [matchContentKind, setMatchContentKind] = useState<MatchContentKind>("MATCH_SUMMARY");
+  const [matchKind, setMatchKind] = useState<ContentDraftKind>("MATCH_SUMMARY");
   const [selectedEventId, setSelectedEventId] = useState<string>("");
   const [summaryTitle, setSummaryTitle] = useState("");
   const [summaryText, setSummaryText] = useState("");
+
+  // أندية
+  const [teamQuery, setTeamQuery] = useState("");
+  const [teamSearching, setTeamSearching] = useState(false);
+  const [teamResults, setTeamResults] = useState<Team[]>([]);
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+
+  // بطولات
+  const [selectedCompetitionId, setSelectedCompetitionId] = useState<string | null>(null);
 
   // المراجعة/التعديل
   const [editTitle, setEditTitle] = useState("");
@@ -147,16 +197,71 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   const [newAttachmentCaption, setNewAttachmentCaption] = useState("");
   const [editLoading, setEditLoading] = useState<"save" | "publish" | "archive" | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+  const [liveSubjectBase, setLiveSubjectBase] = useState<ContentItem | null>(null);
+  const [liveSubjectLoading, setLiveSubjectLoading] = useState(false);
 
-  function selectDraft(draft: ContentDraft) {
+  function resetSubjectFlow() {
+    setSubject(null);
+    setNewsMode("url");
+    setImportUrl("");
+    setManualKind("NEWS");
+    setManualTitle("");
+    setManualSummary("");
+    setManualImage("");
+    setManualVideoUrl("");
+    setMatchGroups(null);
+    setMatchQuery("");
+    setMatchSearchResults(null);
+    setSelectedMatch(null);
+    setMatchKind("MATCH_SUMMARY");
+    setSelectedEventId("");
+    setSummaryTitle("");
+    setSummaryText("");
+    setTeamQuery("");
+    setTeamResults([]);
+    setSelectedTeam(null);
+    setSelectedCompetitionId(null);
+    setCreateError(null);
+  }
+
+  async function chooseSubject(s: SubjectType) {
+    setSubject(s);
+    setCreateError(null);
+    if (s === "MATCH" && !matchGroups) {
+      setMatchGroupsLoading(true);
+      try {
+        setMatchGroups(await listMatchGroupsAction());
+      } finally {
+        setMatchGroupsLoading(false);
+      }
+    }
+  }
+
+  async function selectDraft(draft: ContentDraft) {
     setActiveDraftId(draft.id);
-    const item = resolveContentItem(draft.baseContent, draft.overrides);
+    setEditError(null);
+    setLiveSubjectBase(null);
+
+    let base = draft.baseContent;
+    if (draft.kind === "MATCH_RESULT" || draft.kind === "GOAL" || draft.kind === "MATCH_SUMMARY") {
+      setLiveSubjectLoading(true);
+      try {
+        const live = await getResolvedSubjectBaseAction(draft.id);
+        if (live) {
+          base = live;
+          setLiveSubjectBase(live);
+        }
+      } finally {
+        setLiveSubjectLoading(false);
+      }
+    }
+
+    const item = resolveContentItem(base, draft.overrides);
     setEditTitle(item.title);
     setEditSummary(item.summary ?? "");
     setEditImage(item.imageUrl ?? "");
     setEditDestinations(draft.destinations);
     setEditAttachments(draft.attachments);
-    setEditError(null);
   }
 
   function upsertDraft(draft: ContentDraft) {
@@ -166,35 +271,29 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     });
   }
 
-  function resetCreateForms() {
-    setImportUrl("");
-    setManualTitle("");
-    setManualSummary("");
-    setManualImage("");
-    setMatchQuery("");
-    setMatchResults([]);
-    setSelectedMatch(null);
-    setSelectedEventId("");
-    setSummaryTitle("");
-    setSummaryText("");
+  function errorMessage(code: string): string {
+    switch (code) {
+      case "not_found":
+        return t.admin.importNotFound;
+      case "empty":
+      case "image_required":
+      case "video_required":
+        return t.admin.emptyTitleError;
+      case "no_destination":
+        return t.admin.noDestinationError;
+      default:
+        return t.admin.genericError;
+    }
   }
 
   function applyCreateResult(result: { draft: ContentDraft } | { error: string }) {
     if ("error" in result) {
-      setCreateError(
-        result.error === "not_found"
-          ? t.admin.importNotFound
-          : result.error === "empty" || result.error === "image_required"
-            ? t.admin.emptyTitleError
-            : result.error === "no_destination"
-              ? t.admin.noDestinationError
-              : t.admin.genericError
-      );
+      setCreateError(errorMessage(result.error));
       return;
     }
     upsertDraft(result.draft);
     selectDraft(result.draft);
-    resetCreateForms();
+    resetSubjectFlow();
   }
 
   async function handleImportSubmit(e: React.FormEvent) {
@@ -209,8 +308,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     }
   }
 
-  async function handleManualSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitManual(subjectType: SubjectType, subjectId: string | null) {
     setCreateError(null);
     if (createDestinations.length === 0) return setCreateError(t.admin.noDestinationError);
     setCreateLoading(true);
@@ -218,9 +316,12 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       applyCreateResult(
         await createManualDraftAction({
           kind: manualKind,
+          subjectType,
+          subjectId,
           title: manualTitle,
           summary: manualSummary,
           imageUrl: manualImage,
+          videoUrl: manualVideoUrl,
           destinations: createDestinations,
         })
       );
@@ -231,11 +332,10 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
 
   async function handleMatchSearch(e: React.FormEvent) {
     e.preventDefault();
-    if (!matchQuery.trim()) return;
+    if (!matchQuery.trim()) return setMatchSearchResults(null);
     setMatchSearching(true);
-    setCreateError(null);
     try {
-      setMatchResults(await searchMatchesAction(matchQuery));
+      setMatchSearchResults(await searchMatchesAction(matchQuery));
     } finally {
       setMatchSearching(false);
     }
@@ -244,6 +344,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   async function handleSelectMatch(m: Match) {
     setMatchDetailLoading(true);
     setSelectedEventId("");
+    setMatchKind("MATCH_SUMMARY");
     try {
       const detail = await getMatchDetailAction(m.id);
       setSelectedMatch(detail ?? m);
@@ -255,27 +356,40 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   const eligibleGoalEvents: MatchEvent[] = selectedMatch
     ? selectedMatch.events.filter((e) => e.type === "GOAL" && e.playerName !== "—")
     : [];
+  const matchResultAvailable = Boolean(
+    selectedMatch && selectedMatch.status === "FINISHED" && selectedMatch.homeScore !== null && selectedMatch.awayScore !== null
+  );
 
-  async function handleCreateFromMatch(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleCreateMatchSport() {
     if (!selectedMatch) return;
+    const kind = matchKind as MatchSportKind;
     setCreateError(null);
     if (createDestinations.length === 0) return setCreateError(t.admin.noDestinationError);
-
     setCreateLoading(true);
     try {
       applyCreateResult(
-        await createMatchDraftAction({
-          kind: matchContentKind,
+        await createMatchSportDraftAction({
+          kind,
           matchId: selectedMatch.id,
-          eventId: matchContentKind === "GOAL" ? selectedEventId : undefined,
-          title: matchContentKind === "MATCH_SUMMARY" ? summaryTitle : undefined,
-          summary: matchContentKind === "MATCH_SUMMARY" ? summaryText : undefined,
+          eventId: kind === "GOAL" ? selectedEventId : undefined,
+          title: kind === "MATCH_SUMMARY" ? summaryTitle : undefined,
+          summary: kind === "MATCH_SUMMARY" ? summaryText : undefined,
           destinations: createDestinations,
         })
       );
     } finally {
       setCreateLoading(false);
+    }
+  }
+
+  async function handleTeamSearch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!teamQuery.trim()) return;
+    setTeamSearching(true);
+    try {
+      setTeamResults(await searchTeamsAction(teamQuery));
+    } finally {
+      setTeamSearching(false);
     }
   }
 
@@ -341,7 +455,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   }
 
   const previewItem = activeDraft
-    ? resolveContentItem(activeDraft.baseContent, {
+    ? resolveContentItem(liveSubjectBase ?? activeDraft.baseContent, {
         ...activeDraft.overrides,
         title: editTitle,
         summary: editSummary || undefined,
@@ -350,6 +464,68 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       })
     : null;
   const previewImageAllowed = isAllowedImageHost(previewItem?.imageUrl);
+
+  /** نموذج المحتوى الحر المشترك — عنوان/ملخص/صورة(+فيديو) مع اختيار النوع
+   * ضمن الأنواع المسموحة لهذا الموضوع، ثم الوجهة والإنشاء. تُستدعى من كل
+   * موضوع غير "المباريات المرتبطة بأحداث رياضية" (عام/أندية/بطولات/مباريات
+   * كخبر أو صورة أو فيديو عن المباراة). */
+  function renderManualForm(kindOptions: ManualKind[], onSubmit: () => void) {
+    return (
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit();
+        }}
+        className="space-y-4 max-w-lg"
+      >
+        {kindOptions.length > 1 && (
+          <div>
+            <p className="text-sm font-bold mb-1.5">{t.admin.kindLabel}</p>
+            <div className="flex gap-2">
+              {kindOptions.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setManualKind(k)}
+                  className={pillClass(manualKind === k)}
+                >
+                  {k === "NEWS" ? t.admin.kindNews : k === "IMAGE" ? t.admin.kindImage : t.admin.kindVideo}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div>
+          <label className="block text-sm font-bold mb-1.5">{t.admin.manualTitleLabel}</label>
+          <Input value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-sm font-bold mb-1.5">{t.admin.manualSummaryLabel}</label>
+          <textarea value={manualSummary} onChange={(e) => setManualSummary(e.target.value)} rows={3} className={textareaClass} />
+        </div>
+        {manualKind === "VIDEO" && (
+          <div>
+            <label className="block text-sm font-bold mb-1.5">{t.admin.manualVideoLabel}</label>
+            <Input type="url" dir="ltr" value={manualVideoUrl} onChange={(e) => setManualVideoUrl(e.target.value)} placeholder="https://..." />
+          </div>
+        )}
+        <div>
+          <label className="block text-sm font-bold mb-1.5">
+            {manualKind === "IMAGE" ? t.admin.manualImageLabel : t.admin.manualImageLabelOptional}
+          </label>
+          <Input type="url" dir="ltr" value={manualImage} onChange={(e) => setManualImage(e.target.value)} placeholder="https://..." />
+        </div>
+        <div>
+          <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
+          <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
+        </div>
+        {createError && <p className="text-sm text-error font-bold">{createError}</p>}
+        <Button type="submit" disabled={createLoading}>
+          {createLoading ? t.admin.creating : t.admin.createSubmit}
+        </Button>
+      </form>
+    );
+  }
 
   return (
     <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
@@ -390,248 +566,313 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       <div className="space-y-10">
         {/* الإنشاء */}
         <div>
-          <h2 className="text-lg font-extrabold mb-1">{t.admin.newDraftTitle}</h2>
-          <div className="flex gap-2 mb-4">
-            {([
-              ["url", t.admin.importFromUrlTab],
-              ["manual", t.admin.manualTab],
-              ["match", t.admin.matchTab],
-            ] as const).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setCreateTab(key)}
-                className={cx(
-                  "h-9 px-4 rounded-[var(--radius-sm)] border text-sm font-bold",
-                  createTab === key ? "border-primary text-primary bg-primary/10" : "border-border text-muted"
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <h2 className="text-lg font-extrabold mb-4">{t.admin.newDraftTitle}</h2>
 
-          {createTab === "url" && (
-            <form onSubmit={handleImportSubmit} className="space-y-4 max-w-lg">
-              <div>
-                <label htmlFor="import-url" className="block text-sm font-bold mb-1.5">
-                  {t.admin.newsUrlLabel}
-                </label>
-                <Input id="import-url" type="url" dir="ltr" value={importUrl} onChange={(e) => setImportUrl(e.target.value)} placeholder="https://..." />
-              </div>
-              <div>
-                <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
-                <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
-              </div>
-              {createError && <p className="text-sm text-error font-bold">{createError}</p>}
-              <Button type="submit" disabled={createLoading}>
-                {createLoading ? t.admin.importSubmitting : t.admin.importSubmit}
-              </Button>
-            </form>
-          )}
-
-          {createTab === "manual" && (
-            <form onSubmit={handleManualSubmit} className="space-y-4 max-w-lg">
-              <div>
-                <p className="text-sm font-bold mb-1.5">{t.admin.kindLabel}</p>
-                <div className="flex gap-2">
-                  {([
-                    ["NEWS", t.admin.kindNews],
-                    ["IMAGE", t.admin.kindImage],
-                  ] as const).map(([key, label]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setManualKind(key)}
-                      className={cx(
-                        "h-9 px-4 rounded-[var(--radius-sm)] border text-sm font-bold",
-                        manualKind === key ? "border-primary text-primary bg-primary/10" : "border-border text-muted"
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label htmlFor="manual-title" className="block text-sm font-bold mb-1.5">
-                  {t.admin.manualTitleLabel}
-                </label>
-                <Input id="manual-title" value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="manual-summary" className="block text-sm font-bold mb-1.5">
-                  {t.admin.manualSummaryLabel}
-                </label>
-                <textarea id="manual-summary" value={manualSummary} onChange={(e) => setManualSummary(e.target.value)} rows={3} className={textareaClass} />
-              </div>
-              <div>
-                <label htmlFor="manual-image" className="block text-sm font-bold mb-1.5">
-                  {manualKind === "IMAGE" ? t.admin.manualImageLabel : t.admin.manualImageLabelOptional}
-                </label>
-                <Input id="manual-image" type="url" dir="ltr" value={manualImage} onChange={(e) => setManualImage(e.target.value)} placeholder="https://..." />
-              </div>
-              <div>
-                <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
-                <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
-              </div>
-              {createError && <p className="text-sm text-error font-bold">{createError}</p>}
-              <Button type="submit" disabled={createLoading}>
-                {createLoading ? t.admin.creating : t.admin.createSubmit}
-              </Button>
-            </form>
-          )}
-
-          {createTab === "match" && (
+          {subject === null ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-w-lg">
+              {([
+                ["MATCH", t.admin.subjectMatches],
+                ["TEAM", t.admin.subjectTeams],
+                ["COMPETITION", t.admin.subjectCompetitions],
+                ["NEWS", t.admin.subjectNews],
+                ["GENERAL", t.admin.subjectGeneral],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => chooseSubject(key)}
+                  className="h-16 rounded-[var(--radius-md)] border border-border bg-surface font-extrabold text-sm hover:border-primary/40 hover:bg-surface-2 transition-colors"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : (
             <div className="max-w-lg space-y-5">
-              {!selectedMatch ? (
-                <>
-                  <form onSubmit={handleMatchSearch} className="flex gap-2">
-                    <Input
-                      value={matchQuery}
-                      onChange={(e) => setMatchQuery(e.target.value)}
-                      placeholder={t.admin.matchSearchPlaceholder}
-                      aria-label={t.admin.matchSearchLabel}
-                    />
-                    <Button type="submit" disabled={matchSearching} variant="secondary">
-                      {matchSearching ? t.admin.matchSearching : t.admin.matchSearchButton}
-                    </Button>
-                  </form>
+              <button type="button" onClick={resetSubjectFlow} className="text-xs font-bold text-primary">
+                ← {t.admin.changeSubject}
+              </button>
 
-                  {matchResults.length === 0 ? (
-                    <p className="text-sm text-muted-dim">{t.admin.matchSelectHint}</p>
-                  ) : (
+              {/* ===== مباريات ===== */}
+              {subject === "MATCH" &&
+                (!selectedMatch ? (
+                  <div className="space-y-5">
+                    <form onSubmit={handleMatchSearch} className="flex gap-2">
+                      <Input value={matchQuery} onChange={(e) => setMatchQuery(e.target.value)} placeholder={t.admin.matchSearchPlaceholder} />
+                      <Button type="submit" disabled={matchSearching} variant="secondary">
+                        {matchSearching ? t.admin.matchSearching : t.admin.matchSearchButton}
+                      </Button>
+                    </form>
+
+                    {matchSearchResults !== null ? (
+                      matchSearchResults.length === 0 ? (
+                        <p className="text-sm text-muted-dim">{t.admin.matchNoResults}</p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {matchSearchResults.map((m) => (
+                            <li key={m.id}>
+                              <MatchRow m={m} locale={locale} onSelect={handleSelectMatch} />
+                            </li>
+                          ))}
+                        </ul>
+                      )
+                    ) : matchGroupsLoading ? (
+                      <p className="text-sm text-muted-dim">{t.admin.matchSearching}</p>
+                    ) : (
+                      matchGroups && (
+                        <div className="space-y-5">
+                          {(
+                            [
+                              ["today", t.admin.todayMatchesLabel, matchGroups.today],
+                              ["upcoming", t.admin.upcomingMatchesLabel, matchGroups.upcoming],
+                              ["recent", t.admin.recentMatchesLabel, matchGroups.recent],
+                            ] as const
+                          ).map(([key, label, list]) => (
+                            <div key={key}>
+                              <p className="text-xs font-extrabold text-muted mb-2">{label}</p>
+                              {list.length === 0 ? (
+                                <p className="text-xs text-muted-dim">{t.admin.noMatchesInGroup}</p>
+                              ) : (
+                                <ul className="space-y-2">
+                                  {list.map((m) => (
+                                    <li key={m.id}>
+                                      <MatchRow m={m} locale={locale} onSelect={handleSelectMatch} />
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    )}
+                  </div>
+                ) : matchDetailLoading ? (
+                  <p className="text-sm text-muted-dim">{t.admin.matchSearching}</p>
+                ) : (
+                  <div className="space-y-5">
+                    <div className="rounded-[var(--radius-sm)] border border-border p-3">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-sm font-bold">
+                          {selectedMatch.homeTeam.name} {selectedMatch.homeScore ?? "–"} : {selectedMatch.awayScore ?? "–"} {selectedMatch.awayTeam.name}
+                        </span>
+                        <MatchStatusBadge status={selectedMatch.status} minute={selectedMatch.minute} />
+                      </div>
+                      <p className="text-xs text-muted-dim">
+                        {t.admin.matchCompetitionLabel}: {localizeCompetitionShortName(selectedMatch.competitionId, locale) ?? "—"} · {t.admin.matchDateLabel}:{" "}
+                        {formatKickoffTime(selectedMatch.kickoff, locale)}
+                      </p>
+                      <button type="button" onClick={() => setSelectedMatch(null)} className="text-xs font-bold text-primary mt-2">
+                        {t.admin.changeMatch}
+                      </button>
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-bold mb-1.5">{t.admin.matchContentKindLabel}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(
+                          [
+                            ["MATCH_RESULT", t.admin.matchKindResult, !matchResultAvailable],
+                            ["GOAL", t.admin.matchKindGoal, eligibleGoalEvents.length === 0],
+                            ["MATCH_SUMMARY", t.admin.matchKindSummary, false],
+                            ["NEWS", t.admin.kindNews, false],
+                            ["IMAGE", t.admin.kindImage, false],
+                            ["VIDEO", t.admin.kindVideo, false],
+                          ] as const
+                        ).map(([key, label, disabled]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => {
+                              setMatchKind(key);
+                              if (key === "NEWS" || key === "IMAGE" || key === "VIDEO") setManualKind(key);
+                            }}
+                            className={pillClass(matchKind === key)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {matchKind === "MATCH_RESULT" && !matchResultAvailable && <p className="text-xs text-warning mt-1.5">{t.admin.matchResultUnavailable}</p>}
+                      {matchKind === "GOAL" && eligibleGoalEvents.length === 0 && <p className="text-xs text-warning mt-1.5">{t.admin.matchGoalUnavailable}</p>}
+                    </div>
+
+                    {matchKind === "GOAL" && eligibleGoalEvents.length > 0 && (
+                      <div>
+                        <p className="text-sm font-bold mb-1.5">{t.admin.matchGoalSelectLabel}</p>
+                        <div className="space-y-1.5">
+                          {eligibleGoalEvents.map((ev) => (
+                            <label key={ev.id} className="flex items-center gap-2 text-sm">
+                              <input type="radio" name="goal-event" checked={selectedEventId === ev.id} onChange={() => setSelectedEventId(ev.id)} />
+                              {ev.playerName} — {ev.minute}&apos;{ev.extraMinute ? `+${ev.extraMinute}` : ""}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {matchKind === "MATCH_SUMMARY" && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-bold mb-1.5">{t.admin.matchSummaryTitleLabel}</label>
+                          <Input value={summaryTitle} onChange={(e) => setSummaryTitle(e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-bold mb-1.5">{t.admin.matchSummaryTextLabel}</label>
+                          <textarea value={summaryText} onChange={(e) => setSummaryText(e.target.value)} rows={4} className={textareaClass} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
+                          <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
+                        </div>
+                        {createError && <p className="text-sm text-error font-bold">{createError}</p>}
+                        <Button type="button" onClick={() => handleCreateMatchSport()} disabled={createLoading}>
+                          {createLoading ? t.admin.creating : t.admin.createSubmit}
+                        </Button>
+                      </>
+                    )}
+
+                    {(matchKind === "MATCH_RESULT" || matchKind === "GOAL") && (
+                      <>
+                        <div>
+                          <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
+                          <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
+                        </div>
+                        {createError && <p className="text-sm text-error font-bold">{createError}</p>}
+                        <Button
+                          type="button"
+                          onClick={() => handleCreateMatchSport()}
+                          disabled={createLoading || (matchKind === "GOAL" && !selectedEventId)}
+                        >
+                          {createLoading ? t.admin.creating : t.admin.createSubmit}
+                        </Button>
+                      </>
+                    )}
+
+                    {(matchKind === "NEWS" || matchKind === "IMAGE" || matchKind === "VIDEO") &&
+                      renderManualForm(["NEWS", "IMAGE", "VIDEO"], () => submitManual("MATCH", selectedMatch.id))}
+                  </div>
+                ))}
+
+              {/* ===== أندية ===== */}
+              {subject === "TEAM" &&
+                (!selectedTeam ? (
+                  <div className="space-y-4">
+                    <form onSubmit={handleTeamSearch} className="flex gap-2">
+                      <Input value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder={t.admin.teamSearchPlaceholder} />
+                      <Button type="submit" disabled={teamSearching} variant="secondary">
+                        {teamSearching ? t.admin.matchSearching : t.admin.matchSearchButton}
+                      </Button>
+                    </form>
+                    {teamResults.length === 0 ? (
+                      <p className="text-sm text-muted-dim">{t.admin.teamSelectHint}</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {teamResults.map((team) => (
+                          <li key={team.id}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTeam(team)}
+                              className="w-full text-start rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors text-sm font-bold"
+                            >
+                              {team.name}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="rounded-[var(--radius-sm)] border border-border p-3 flex items-center justify-between">
+                      <span className="text-sm font-bold">{selectedTeam.name}</span>
+                      <button type="button" onClick={() => setSelectedTeam(null)} className="text-xs font-bold text-primary">
+                        {t.admin.changeTeam}
+                      </button>
+                    </div>
+                    {renderManualForm(["NEWS", "IMAGE", "VIDEO"], () => submitManual("TEAM", selectedTeam.id))}
+                  </div>
+                ))}
+
+              {/* ===== بطولات ===== */}
+              {subject === "COMPETITION" &&
+                (!selectedCompetitionId ? (
+                  <div>
+                    <p className="text-sm text-muted-dim mb-3">{t.admin.competitionSelectHint}</p>
                     <ul className="space-y-2">
-                      {matchResults.map((m) => (
-                        <li key={m.id}>
+                      {CATALOG_COMPETITIONS.map((c) => (
+                        <li key={c.id}>
                           <button
                             type="button"
-                            onClick={() => handleSelectMatch(m)}
-                            className="w-full text-start rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors"
+                            onClick={() => setSelectedCompetitionId(c.id)}
+                            className="w-full text-start rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors text-sm font-bold"
                           >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm font-bold">
-                                {m.homeTeam.name} × {m.awayTeam.name}
-                              </span>
-                              <MatchStatusBadge status={m.status} minute={m.minute} />
-                            </div>
-                            <span className="text-xs text-muted-dim">
-                              {localizeCompetitionShortName(m.competitionId, locale) ?? ""} · {formatKickoffTime(m.kickoff, locale)}
-                            </span>
+                            {localizeCompetitionShortName(c.id, locale) ?? c.fallback}
                           </button>
                         </li>
                       ))}
                     </ul>
-                  )}
-                </>
-              ) : matchDetailLoading ? (
-                <p className="text-sm text-muted-dim">{t.admin.matchSearching}</p>
-              ) : (
-                <form onSubmit={handleCreateFromMatch} className="space-y-4">
-                  <div className="rounded-[var(--radius-sm)] border border-border p-3">
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="text-sm font-bold">
-                        {selectedMatch.homeTeam.name} {selectedMatch.homeScore ?? "–"} : {selectedMatch.awayScore ?? "–"} {selectedMatch.awayTeam.name}
-                      </span>
-                      <MatchStatusBadge status={selectedMatch.status} minute={selectedMatch.minute} />
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="rounded-[var(--radius-sm)] border border-border p-3 flex items-center justify-between">
+                      <span className="text-sm font-bold">{localizeCompetitionShortName(selectedCompetitionId, locale) ?? selectedCompetitionId}</span>
+                      <button type="button" onClick={() => setSelectedCompetitionId(null)} className="text-xs font-bold text-primary">
+                        {t.admin.changeCompetition}
+                      </button>
                     </div>
-                    <p className="text-xs text-muted-dim">
-                      {t.admin.matchCompetitionLabel}: {localizeCompetitionShortName(selectedMatch.competitionId, locale) ?? "—"} · {t.admin.matchDateLabel}:{" "}
-                      {formatKickoffTime(selectedMatch.kickoff, locale)}
-                    </p>
-                    <button type="button" onClick={() => setSelectedMatch(null)} className="text-xs font-bold text-primary mt-2">
-                      {t.admin.changeMatch}
-                    </button>
+                    {renderManualForm(["NEWS", "IMAGE", "VIDEO"], () => submitManual("COMPETITION", selectedCompetitionId))}
+                  </div>
+                ))}
+
+              {/* ===== أخبار ===== */}
+              {subject === "NEWS" && (
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    {(
+                      [
+                        ["url", t.admin.importFromUrlTab],
+                        ["manual", t.admin.manualTab],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          setNewsMode(key);
+                          if (key === "manual") setManualKind("NEWS");
+                        }}
+                        className={pillClass(newsMode === key)}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
 
-                  <div>
-                    <p className="text-sm font-bold mb-1.5">{t.admin.matchContentKindLabel}</p>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={selectedMatch.status !== "FINISHED" || selectedMatch.homeScore === null || selectedMatch.awayScore === null}
-                        onClick={() => setMatchContentKind("MATCH_RESULT")}
-                        className={cx(
-                          "h-9 px-4 rounded-[var(--radius-sm)] border text-sm font-bold disabled:opacity-40",
-                          matchContentKind === "MATCH_RESULT" ? "border-primary text-primary bg-primary/10" : "border-border text-muted"
-                        )}
-                      >
-                        {t.admin.matchKindResult}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={eligibleGoalEvents.length === 0}
-                        onClick={() => setMatchContentKind("GOAL")}
-                        className={cx(
-                          "h-9 px-4 rounded-[var(--radius-sm)] border text-sm font-bold disabled:opacity-40",
-                          matchContentKind === "GOAL" ? "border-primary text-primary bg-primary/10" : "border-border text-muted"
-                        )}
-                      >
-                        {t.admin.matchKindGoal}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMatchContentKind("MATCH_SUMMARY")}
-                        className={cx(
-                          "h-9 px-4 rounded-[var(--radius-sm)] border text-sm font-bold",
-                          matchContentKind === "MATCH_SUMMARY" ? "border-primary text-primary bg-primary/10" : "border-border text-muted"
-                        )}
-                      >
-                        {t.admin.matchKindSummary}
-                      </button>
-                    </div>
-                    {matchContentKind === "MATCH_RESULT" && (selectedMatch.status !== "FINISHED" || selectedMatch.homeScore === null) && (
-                      <p className="text-xs text-warning mt-1.5">{t.admin.matchResultUnavailable}</p>
-                    )}
-                    {matchContentKind === "GOAL" && eligibleGoalEvents.length === 0 && <p className="text-xs text-warning mt-1.5">{t.admin.matchGoalUnavailable}</p>}
-                  </div>
-
-                  {matchContentKind === "GOAL" && eligibleGoalEvents.length > 0 && (
-                    <div>
-                      <p className="text-sm font-bold mb-1.5">{t.admin.matchGoalSelectLabel}</p>
-                      <div className="space-y-1.5">
-                        {eligibleGoalEvents.map((ev) => (
-                          <label key={ev.id} className="flex items-center gap-2 text-sm">
-                            <input type="radio" name="goal-event" checked={selectedEventId === ev.id} onChange={() => setSelectedEventId(ev.id)} />
-                            {ev.playerName} — {ev.minute}&apos;{ev.extraMinute ? `+${ev.extraMinute}` : ""}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {matchContentKind === "MATCH_SUMMARY" && (
-                    <>
+                  {newsMode === "url" ? (
+                    <form onSubmit={handleImportSubmit} className="space-y-4">
                       <div>
-                        <label htmlFor="summary-title" className="block text-sm font-bold mb-1.5">
-                          {t.admin.matchSummaryTitleLabel}
-                        </label>
-                        <Input id="summary-title" value={summaryTitle} onChange={(e) => setSummaryTitle(e.target.value)} />
+                        <label className="block text-sm font-bold mb-1.5">{t.admin.newsUrlLabel}</label>
+                        <Input type="url" dir="ltr" value={importUrl} onChange={(e) => setImportUrl(e.target.value)} placeholder="https://..." />
                       </div>
                       <div>
-                        <label htmlFor="summary-text" className="block text-sm font-bold mb-1.5">
-                          {t.admin.matchSummaryTextLabel}
-                        </label>
-                        <textarea id="summary-text" value={summaryText} onChange={(e) => setSummaryText(e.target.value)} rows={4} className={textareaClass} />
+                        <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
+                        <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
                       </div>
-                    </>
+                      {createError && <p className="text-sm text-error font-bold">{createError}</p>}
+                      <Button type="submit" disabled={createLoading}>
+                        {createLoading ? t.admin.importSubmitting : t.admin.importSubmit}
+                      </Button>
+                    </form>
+                  ) : (
+                    renderManualForm(["NEWS"], () => submitManual("NEWS", null))
                   )}
-
-                  <div>
-                    <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
-                    <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
-                  </div>
-
-                  {createError && <p className="text-sm text-error font-bold">{createError}</p>}
-
-                  <Button
-                    type="submit"
-                    disabled={createLoading || (matchContentKind === "GOAL" && !selectedEventId)}
-                  >
-                    {createLoading ? t.admin.creating : t.admin.createSubmit}
-                  </Button>
-                </form>
+                </div>
               )}
+
+              {/* ===== عام ===== */}
+              {subject === "GENERAL" && renderManualForm(["NEWS", "IMAGE", "VIDEO"], () => submitManual("GENERAL", null))}
             </div>
           )}
         </div>
@@ -645,6 +886,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
               <Badge tone={statusTone(activeDraft.status)}>
                 {activeDraft.status === "PUBLISHED" ? t.admin.statusPublished : activeDraft.status === "ARCHIVED" ? t.admin.statusArchived : t.admin.statusDraft}
               </Badge>
+              {liveSubjectLoading && <span className="text-xs text-muted-dim">…</span>}
             </div>
             {activeDraft.status === "PUBLISHED" && <p className="text-xs text-success mb-4">{t.admin.publishedHint}</p>}
             {activeDraft.status === "ARCHIVED" && <p className="text-xs text-muted-dim mb-4">{t.admin.archivedHint}</p>}

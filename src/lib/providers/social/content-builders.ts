@@ -59,14 +59,18 @@ export function toGoalContentItem(match: Match, event: MatchEvent): ContentItem 
   };
 }
 
-/** ملخص/تقرير مباراة تحريري — النص من المحرِّر دائماً (لا اختلاق تلخيص
- * آلي)، وبيانات الفرق/النتيجة/البطولة من المباراة الحقيقية نفسها فقط. */
-export function toMatchSummaryContentItem(match: Match, text: { title: string; summary?: string }): ContentItem {
+/**
+ * ملخص مباراة — بيانات الفرق/النتيجة/البطولة حصراً من المباراة الحقيقية
+ * الحيّة (تُستدعى هذه الدالة من جديد في كل مرة يُعرَض/يُنشَر فيها المحتوى،
+ * لا مرة واحدة فقط وقت الإنشاء) — بلا أي نص تحريري هنا إطلاقاً. النص
+ * التحريري (العنوان/الملخص الفعليان) يصل حصراً عبر overrides في
+ * resolveContentItem، فلا يُجمَّد أبداً كـ"حقيقة" داخل هذا الكائن. العنوان
+ * هنا مجرّد تسمية محايدة (اسما الفريقين) تُستبدَل بالعنوان التحريري فوراً. */
+export function toMatchSummaryBaseContent(match: Match): ContentItem {
   return {
     id: `match-summary-${match.id}`,
     kind: "MATCH_SUMMARY",
-    title: text.title,
-    summary: text.summary,
+    title: `${match.homeTeam.name} × ${match.awayTeam.name}`,
     sourceUrl: `/matches/${match.id}`,
     publishedAt: match.kickoff,
     data: {
@@ -113,6 +117,29 @@ export function toNewsContentItem(article: NewsArticle): ContentItem {
       category: article.category,
       relatedName: article.relatedName,
     },
+  };
+}
+
+/** فيديو/Clip كرابط خارجي يدوي — لا يعتمد على مجمّع يوتيوب المُهيَّأ (خلافاً
+ * لـtoVideoContentItem أدناه)، لكن يتطلّب رابطاً حقيقياً فعلياً دائماً. */
+export function toManualVideoContentItem(input: {
+  title: string;
+  videoUrl: string;
+  imageUrl?: string;
+  caption?: string;
+}): ContentItem | null {
+  const videoUrl = input.videoUrl.trim();
+  if (!videoUrl) return null;
+
+  return {
+    id: `video-manual-${Date.now()}`,
+    kind: "VIDEO",
+    title: input.title,
+    summary: input.caption,
+    imageUrl: input.imageUrl?.trim() || null,
+    sourceUrl: videoUrl,
+    publishedAt: new Date().toISOString(),
+    data: { embedUrl: videoUrl },
   };
 }
 

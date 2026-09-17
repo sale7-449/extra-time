@@ -12,7 +12,13 @@ import type { Attachment, ContentItem } from "@/lib/providers/social/types";
 const TABLE = "content_drafts";
 
 export type ContentDraftKind = "NEWS" | "MATCH_RESULT" | "GOAL" | "MATCH_SUMMARY" | "IMAGE" | "VIDEO";
-export type ContentDraftSourceType = "URL" | "MANUAL" | "MATCH";
+/** منشأ النص التحريري فقط (رابط أم كتابة يدوية) — لا علاقة له بربط
+ * المباراة/النادي/البطولة، ذاك دور SubjectType حصراً. */
+export type ContentDraftSourceType = "URL" | "MANUAL";
+/** الكيان الرياضي/التحريري الذي يدور حوله المحتوى — الربط الحقيقي الوحيد
+ * بمباراة/نادٍ/بطولة (عبر subjectId، معرّف حقيقي من مزوّد المباريات، لا نسخ
+ * بيانات). NEWS/GENERAL بلا كيان مرتبط (subjectId يبقى null). */
+export type SubjectType = "MATCH" | "TEAM" | "COMPETITION" | "NEWS" | "GENERAL";
 export type ContentDestination = "SITE" | "SNAPCHAT";
 export type ContentDraftStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 
@@ -21,7 +27,16 @@ export interface ContentDraft {
   kind: ContentDraftKind;
   sourceType: ContentDraftSourceType;
   sourceRef: string | null;
-  /** لقطة مجمَّدة من ContentItem وقت الإنشاء/الاستيراد — لا تتغيّر تلقائياً. */
+  subjectType: SubjectType;
+  /** معرّف حقيقي موسوم (af-123 لمباراة، معرّف فريق/بطولة...) — null لـNEWS/GENERAL. */
+  subjectId: string | null;
+  /** معرّف حدث هدف حقيقي ضمن المباراة — فقط عندما subjectType='MATCH' وkind='GOAL'. */
+  subjectEventId: string | null;
+  /** بيانات أساسية — للأنواع المرتبطة بمباراة (MATCH_RESULT/GOAL/MATCH_SUMMARY)
+   * هذه مجرّد بيانة أولية عند الإنشاء فقط، لا تُعتمَد للعرض/النشر أبداً —
+   * البيانات الحقيقية تُجلَب من جديد حيّة من المزوّد في كل مرة (راجع
+   * admin-content.actions.ts: getResolvedSubjectBaseAction). لباقي الأنواع
+   * (NEWS/IMAGE/VIDEO) هذه هي المحتوى التحريري الفعلي المُجمَّد وقت الإنشاء. */
   baseContent: ContentItem;
   /** تعديلات المحرِّر فوق baseContent (جزئية) — راجع resolveContentItem في content-builders.ts. */
   overrides: Partial<ContentItem>;
@@ -40,6 +55,9 @@ interface ContentDraftRow {
   kind: string;
   source_type: string;
   source_ref: string | null;
+  subject_type: string;
+  subject_id: string | null;
+  subject_event_id: string | null;
   base_content: ContentItem;
   overrides: Partial<ContentItem>;
   attachments: Attachment[];
@@ -57,6 +75,9 @@ function fromRow(row: ContentDraftRow): ContentDraft {
     kind: row.kind as ContentDraftKind,
     sourceType: row.source_type as ContentDraftSourceType,
     sourceRef: row.source_ref,
+    subjectType: row.subject_type as SubjectType,
+    subjectId: row.subject_id,
+    subjectEventId: row.subject_event_id,
     baseContent: row.base_content,
     overrides: row.overrides ?? {},
     attachments: row.attachments ?? [],
@@ -70,7 +91,7 @@ function fromRow(row: ContentDraftRow): ContentDraft {
 }
 
 const SELECT_COLUMNS =
-  "id, kind, source_type, source_ref, base_content, overrides, attachments, destinations, status, created_by, created_at, updated_at, published_at";
+  "id, kind, source_type, source_ref, subject_type, subject_id, subject_event_id, base_content, overrides, attachments, destinations, status, created_by, created_at, updated_at, published_at";
 
 export async function listContentDrafts(): Promise<ContentDraft[]> {
   const supabase = createServiceRoleClient();
@@ -99,7 +120,11 @@ export async function createContentDraft(input: {
   kind: ContentDraftKind;
   sourceType: ContentDraftSourceType;
   sourceRef?: string | null;
+  subjectType: SubjectType;
+  subjectId?: string | null;
+  subjectEventId?: string | null;
   baseContent: ContentItem;
+  overrides?: Partial<ContentItem>;
   destinations: ContentDestination[];
   createdBy: string;
 }): Promise<ContentDraft | null> {
@@ -112,8 +137,11 @@ export async function createContentDraft(input: {
       kind: input.kind,
       source_type: input.sourceType,
       source_ref: input.sourceRef ?? null,
+      subject_type: input.subjectType,
+      subject_id: input.subjectId ?? null,
+      subject_event_id: input.subjectEventId ?? null,
       base_content: input.baseContent,
-      overrides: {},
+      overrides: input.overrides ?? {},
       destinations: input.destinations,
       status: "DRAFT",
       created_by: input.createdBy,
