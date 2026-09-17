@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { cx, formatKickoffTime } from "@/lib/utils";
 import { localizeCompetitionShortName } from "@/lib/i18n/localized-names";
@@ -28,6 +27,7 @@ import {
   type TeamsByCompetitionGroup,
   getMatchDetailAction,
   getResolvedSubjectBaseAction,
+  extractOpenGraphAction,
   type MatchGroups,
 } from "@/lib/actions/admin-content.actions";
 import type { ContentDraft, ContentDestination, ContentDraftKind, SubjectType } from "@/lib/admin/content-drafts";
@@ -169,6 +169,11 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   const [manualSummary, setManualSummary] = useState("");
   const [manualImage, setManualImage] = useState("");
   const [manualVideoUrl, setManualVideoUrl] = useState("");
+  // استيراد عام اختياري (Open Graph) — يملأ الحقول أعلاه فقط، لا يُنشئ شيئاً بنفسه
+  const [ogImportUrl, setOgImportUrl] = useState("");
+  const [ogImportLoading, setOgImportLoading] = useState(false);
+  const [ogImportMessage, setOgImportMessage] = useState<string | null>(null);
+  const [manualSourceRef, setManualSourceRef] = useState<string | null>(null);
 
   // مباريات
   const [matchGroups, setMatchGroups] = useState<MatchGroups | null>(null);
@@ -217,6 +222,9 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     setManualSummary("");
     setManualImage("");
     setManualVideoUrl("");
+    setOgImportUrl("");
+    setOgImportMessage(null);
+    setManualSourceRef(null);
     setMatchGroups(null);
     setMatchQuery("");
     setMatchSearchResults(null);
@@ -325,6 +333,34 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     }
   }
 
+  async function handleExtractOpenGraph() {
+    const url = ogImportUrl.trim();
+    if (!url) return;
+    setOgImportLoading(true);
+    setOgImportMessage(null);
+    try {
+      const result = await extractOpenGraphAction(url);
+      if ("error" in result) {
+        setOgImportMessage(
+          result.error === "blocked_host"
+            ? t.admin.ogBlockedHost
+            : result.error === "invalid_url"
+              ? t.admin.ogInvalidUrl
+              : t.admin.ogFetchFailed
+        );
+        return;
+      }
+      const { data } = result;
+      if (data.title) setManualTitle(data.title);
+      if (data.description) setManualSummary(data.description);
+      if (data.imageUrl) setManualImage(data.imageUrl);
+      setManualSourceRef(data.canonicalUrl);
+      setOgImportMessage(data.warnings.length > 0 ? t.admin.ogPartialData : t.admin.ogSuccess);
+    } finally {
+      setOgImportLoading(false);
+    }
+  }
+
   async function submitManual(subjectType: SubjectType, subjectId: string | null) {
     setCreateError(null);
     if (createDestinations.length === 0) return setCreateError(t.admin.noDestinationError);
@@ -339,6 +375,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
           summary: manualSummary,
           imageUrl: manualImage,
           videoUrl: manualVideoUrl,
+          sourceRef: manualSourceRef,
           destinations: createDestinations,
         })
       );
@@ -470,7 +507,6 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
         attachments: editAttachments,
       })
     : null;
-  const previewImageAllowed = isAllowedImageHost(previewItem?.imageUrl);
 
   /** نموذج المحتوى الحر المشترك — عنوان/ملخص/صورة(+فيديو) مع اختيار النوع
    * ضمن الأنواع المسموحة لهذا الموضوع، ثم الوجهة والإنشاء. تُستدعى من كل
@@ -485,6 +521,26 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
         }}
         className="space-y-4 max-w-lg"
       >
+        <div className="rounded-[var(--radius-sm)] border border-dashed border-border p-3">
+          <p className="text-xs font-bold text-muted mb-1.5">{t.admin.ogImportLabel}</p>
+          <div className="flex gap-2">
+            <Input
+              type="url"
+              dir="ltr"
+              value={ogImportUrl}
+              onChange={(e) => {
+                setOgImportUrl(e.target.value);
+                setOgImportMessage(null);
+              }}
+              placeholder="https://..."
+            />
+            <Button type="button" size="sm" variant="secondary" onClick={handleExtractOpenGraph} disabled={ogImportLoading || !ogImportUrl.trim()}>
+              {ogImportLoading ? t.admin.ogExtracting : t.admin.ogExtract}
+            </Button>
+          </div>
+          {ogImportMessage && <p className="text-xs text-muted mt-1.5">{ogImportMessage}</p>}
+        </div>
+
         {kindOptions.length > 1 && (
           <div>
             <p className="text-sm font-bold mb-1.5">{t.admin.kindLabel}</p>
@@ -1047,8 +1103,9 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                   <p className="text-sm font-bold mb-2">{t.admin.websitePreviewTitle}</p>
                   <div className="rounded-[var(--radius-lg)] border border-border bg-surface overflow-hidden max-w-sm">
                     <div className="relative h-40 bg-surface-2">
-                      {previewItem.imageUrl && previewImageAllowed && (
-                        <Image src={previewItem.imageUrl} alt={previewItem.title} fill sizes="384px" className="object-cover" />
+                      {previewItem.imageUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element -- معاينة إدارية لأي رابط خارجي مُستورَد (OG) — next/image يتطلّب إدراج المضيف مسبقاً، غير عملي لروابط عامة عشوائية هنا.
+                        <img src={previewItem.imageUrl} alt={previewItem.title} className="absolute inset-0 h-full w-full object-cover" />
                       )}
                     </div>
                     <div className="p-4">

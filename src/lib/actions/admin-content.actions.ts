@@ -18,6 +18,7 @@ import { COMPETITION_CATALOG } from "@/lib/providers/football/competition-catalo
 import { canonicalCompetitionId, tagId } from "@/lib/providers/football/ids";
 import { getTeamsByCompetition } from "@/lib/providers/football";
 import { uploadContentMedia } from "@/lib/admin/content-media-storage";
+import { extractOpenGraph, type OpenGraphOutcome } from "@/lib/admin/open-graph-extractor";
 import type { ContentItem, Attachment } from "@/lib/providers/social/types";
 import type { Match, Team } from "@/lib/types";
 import { getAdminSession } from "@/lib/admin/session";
@@ -193,6 +194,9 @@ export async function createManualDraftAction(input: {
   summary: string;
   imageUrl: string;
   videoUrl?: string;
+  /** الرابط الأصلي إن جاء المحتوى من استخراج Open Graph — للتوثيق فقط
+   * (source_type/source_ref)، لا يُغيّر طريقة بناء baseContent. */
+  sourceRef?: string | null;
   destinations: ContentDestination[];
 }): Promise<DraftActionResult> {
   const createdBy = await requireAdminUsername();
@@ -230,10 +234,11 @@ export async function createManualDraftAction(input: {
     };
   }
 
+  const sourceRef = input.sourceRef?.trim() || null;
   const draft = await createContentDraft({
     kind: input.kind,
-    sourceType: "MANUAL",
-    sourceRef: null,
+    sourceType: sourceRef ? "URL" : "MANUAL",
+    sourceRef,
     subjectType: input.subjectType,
     subjectId: input.subjectId ?? null,
     baseContent,
@@ -518,4 +523,15 @@ export async function uploadContentMediaAction(input: {
 }): Promise<{ url: string } | { error: string }> {
   await requireAdminUsername();
   return uploadContentMedia(input);
+}
+
+/**
+ * استخراج عام من رابط خارجي عبر Open Graph — مساعد اختياري بحت لتعبئة نموذج
+ * الإنشاء اليدوي (لا يُنشئ Draft بنفسه، ولا يُلزم بأي حقل): طلب HTML واحد
+ * فقط، بلا تسجيل دخول أو تجاوز حماية، بلا زحف لصفحات إضافية. أي حقل غائب في
+ * الصفحة يعود null صراحة مع تحذير مطابق — لا اختلاق، والمستخدم يكمل يدوياً.
+ */
+export async function extractOpenGraphAction(url: string): Promise<OpenGraphOutcome> {
+  await requireAdminUsername();
+  return extractOpenGraph(url);
 }
