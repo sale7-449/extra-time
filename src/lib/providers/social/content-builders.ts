@@ -94,3 +94,17 @@ export function toVideoContentItem(item: MediaItem): ContentItem {
     },
   };
 }
+
+/**
+ * Content Studio (Draft) — مصدر الحقيقة الوحيد لكل من نسخة الموقع ونسخة
+ * Snapchat: دمج صريح لـbase_content (لقطة مجمَّدة وقت الإنشاء/الاستيراد) مع
+ * overrides (تعديلات المحرِّر) في ContentItem واحد. كلا الوجهتين يجب أن
+ * تستهلكا ناتج هذه الدالة تحديداً، لا تُعيدا اشتقاق البيانات كل على حدة.
+ */
+export function resolveContentItem(baseContent: ContentItem, overrides: Partial<ContentItem>): ContentItem {
+  return {
+    ...baseContent,
+    ...overrides,
+    data: { ...baseContent.data, ...overrides.data },
+  };
+}

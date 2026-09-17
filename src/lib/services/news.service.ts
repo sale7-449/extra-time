@@ -1,6 +1,49 @@
 import { newsProvider } from "@/lib/providers/news";
 import type { NewsArticle } from "@/lib/types";
 import type { Locale } from "@/lib/i18n/messages";
+import { listPublishedSiteNewsDrafts } from "@/lib/admin/content-drafts";
+import { resolveContentItem } from "@/lib/providers/social/content-builders";
+
+const NEWS_CATEGORIES = new Set<NewsArticle["category"]>([
+  "SAUDI_LEAGUE", "PREMIER_LEAGUE", "LA_LIGA", "BUNDESLIGA", "SERIE_A",
+  "LIGUE_1", "CHAMPIONS_LEAGUE", "INTERNATIONAL", "TRANSFERS", "FOOTBALL",
+]);
+
+/** خبر منشور من Content Studio (Admin) → NewsArticle حقيقي بنفس شكل خبر
+ * RSS تماماً، ليدخل نفس مسار الدمج/الفرز/الإزالة أدناه بلا أي مسار موازٍ. */
+function draftToNewsArticle(draftId: string, item: ReturnType<typeof resolveContentItem>): NewsArticle | null {
+  if (item.kind !== "NEWS" || !item.title.trim()) return null;
+
+  const category = typeof item.data?.category === "string" && NEWS_CATEGORIES.has(item.data.category as NewsArticle["category"])
+    ? (item.data.category as NewsArticle["category"])
+    : "FOOTBALL";
+
+  return {
+    id: `admin-${draftId}`,
+    title: item.title,
+    summary: item.summary ?? "",
+    imageUrl: item.imageUrl ?? null,
+    source: typeof item.data?.source === "string" ? item.data.source : "Extra Time",
+    sourceUrl: item.sourceUrl ?? `/news/admin-${draftId}`,
+    publishedAt: item.publishedAt,
+    category,
+    relatedName: typeof item.data?.relatedName === "string" ? item.data.relatedName : undefined,
+    language: item.language,
+  };
+}
+
+/** الأخبار المنشورة فعلياً من Content Studio لوجهة الموقع — [] بصمت عند أي
+ * فشل قراءة (لا تكسر RSS الحالي إطلاقاً بسبب مشكلة في مصدر إداري منفصل). */
+async function getPublishedAdminNews(): Promise<NewsArticle[]> {
+  const drafts = await listPublishedSiteNewsDrafts();
+  const articles: NewsArticle[] = [];
+  for (const draft of drafts) {
+    const item = resolveContentItem(draft.baseContent, draft.overrides);
+    const article = draftToNewsArticle(draft.id, item);
+    if (article) articles.push(article);
+  }
+  return articles;
+}
 
 // حجم تجمّع كبير عمداً: RssNewsProvider يجلب كل الموجزات المُهيَّأة دائماً
 // بغضّ النظر عن الرقم المطلوب (التقطيع فقط هو ما يتغيّر)، فرفعه هنا لا
@@ -121,13 +164,22 @@ function dedupeArticles(articles: NewsArticle[]): NewsArticle[] {
   return kept;
 }
 
+/** المصدر الخام الموحَّد لكل دوال هذا الملف: موجزات RSS الحقيقية + أخبار
+ * Content Studio المنشورة فعلياً لوجهة الموقع (Admin) — كلاهما NewsArticle
+ * حقيقي بنفس الشكل تماماً، فيدخلان معاً نفس مسار dedupe/sort أدناه بلا أي
+ * معاملة خاصة. فشل قراءة أخبار Admin لا يكسر RSS إطلاقاً (راجع getPublishedAdminNews). */
+async function getRawPool(): Promise<NewsArticle[]> {
+  const [rss, admin] = await Promise.all([newsProvider.getLatestNews(POOL_SIZE), getPublishedAdminNews()]);
+  return [...admin, ...rss];
+}
+
 export async function getTopStory(locale: Locale = "ar"): Promise<NewsArticle | null> {
-  const pool = await newsProvider.getLatestNews(POOL_SIZE);
+  const pool = await getRawPool();
   return dedupeArticles(sortForLocale(pool, locale))[0] ?? null;
 }
 
 export async function getLatestNews(limit = 6, locale: Locale = "ar"): Promise<NewsArticle[]> {
-  const pool = await newsProvider.getLatestNews(POOL_SIZE);
+  const pool = await getRawPool();
   return dedupeArticles(sortForLocale(pool, locale)).slice(0, limit);
 }
 
@@ -136,7 +188,7 @@ export async function getLatestNews(limit = 6, locale: Locale = "ar"): Promise<N
  * منطق sortForLocale/dedupeArticles في كل مكان. لا طلب شبكة إضافي —
  * newsProvider.getLatestNews يعتمد على تخزين RSS المؤقت نفسه دائماً. */
 export async function getNewsPool(locale: Locale = "ar"): Promise<NewsArticle[]> {
-  const pool = await newsProvider.getLatestNews(POOL_SIZE);
+  const pool = await getRawPool();
   return dedupeArticles(sortForLocale(pool, locale));
 }
 
