@@ -1,18 +1,18 @@
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
-import type { ContentItem } from "@/lib/providers/social/types";
+import type { Attachment, ContentItem } from "@/lib/providers/social/types";
 
 /**
- * طبقة خدمة Drafts في Content Studio (المرحلة الأولى: NEWS فقط) — تخزين عبر
- * public.content_drafts (راجع supabase/migrations/0004_content_drafts.sql)،
- * وصول حصراً عبر service_role، بلا علاقة بـSupabase Auth أو نظام Admin
- * نفسه (هذا الملف يخزّن/يقرأ فقط — التحقق من صلاحية المسؤول يحدث في طبقة
+ * طبقة خدمة Drafts في Content Studio — تخزين عبر public.content_drafts
+ * (راجع migrations 0004 و0005_content_drafts_kinds.sql للتوسعة)، وصول
+ * حصراً عبر service_role، بلا علاقة بـSupabase Auth أو نظام Admin نفسه
+ * (هذا الملف يخزّن/يقرأ فقط — التحقق من صلاحية المسؤول يحدث في طبقة
  * الـServer Actions المستدعية عبر getAdminSession()، لا هنا).
  */
 
 const TABLE = "content_drafts";
 
-export type ContentDraftKind = "NEWS";
-export type ContentDraftSourceType = "URL" | "MANUAL";
+export type ContentDraftKind = "NEWS" | "MATCH_RESULT" | "GOAL" | "MATCH_SUMMARY" | "IMAGE" | "VIDEO";
+export type ContentDraftSourceType = "URL" | "MANUAL" | "MATCH";
 export type ContentDestination = "SITE" | "SNAPCHAT";
 export type ContentDraftStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 
@@ -25,6 +25,8 @@ export interface ContentDraft {
   baseContent: ContentItem;
   /** تعديلات المحرِّر فوق baseContent (جزئية) — راجع resolveContentItem في content-builders.ts. */
   overrides: Partial<ContentItem>;
+  /** عناصر إضافية اختيارية (صورة/فيديو/رابط) فوق المحتوى الأساسي — تركيبات حرة. */
+  attachments: Attachment[];
   destinations: ContentDestination[];
   status: ContentDraftStatus;
   createdBy: string;
@@ -40,6 +42,7 @@ interface ContentDraftRow {
   source_ref: string | null;
   base_content: ContentItem;
   overrides: Partial<ContentItem>;
+  attachments: Attachment[];
   destinations: string[];
   status: string;
   created_by: string;
@@ -56,6 +59,7 @@ function fromRow(row: ContentDraftRow): ContentDraft {
     sourceRef: row.source_ref,
     baseContent: row.base_content,
     overrides: row.overrides ?? {},
+    attachments: row.attachments ?? [],
     destinations: (row.destinations ?? []) as ContentDestination[],
     status: row.status as ContentDraftStatus,
     createdBy: row.created_by,
@@ -66,7 +70,7 @@ function fromRow(row: ContentDraftRow): ContentDraft {
 }
 
 const SELECT_COLUMNS =
-  "id, kind, source_type, source_ref, base_content, overrides, destinations, status, created_by, created_at, updated_at, published_at";
+  "id, kind, source_type, source_ref, base_content, overrides, attachments, destinations, status, created_by, created_at, updated_at, published_at";
 
 export async function listContentDrafts(): Promise<ContentDraft[]> {
   const supabase = createServiceRoleClient();
@@ -123,7 +127,7 @@ export async function createContentDraft(input: {
 
 export async function updateContentDraft(
   id: string,
-  patch: { overrides?: Partial<ContentItem>; destinations?: ContentDestination[] }
+  patch: { overrides?: Partial<ContentItem>; destinations?: ContentDestination[]; attachments?: Attachment[] }
 ): Promise<ContentDraft | null> {
   const supabase = createServiceRoleClient();
   if (!supabase) return null;
@@ -131,6 +135,7 @@ export async function updateContentDraft(
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (patch.overrides !== undefined) update.overrides = patch.overrides;
   if (patch.destinations !== undefined) update.destinations = patch.destinations;
+  if (patch.attachments !== undefined) update.attachments = patch.attachments;
 
   const { data, error } = await supabase.from(TABLE).update(update).eq("id", id).select(SELECT_COLUMNS).maybeSingle();
   if (error || !data) return null;

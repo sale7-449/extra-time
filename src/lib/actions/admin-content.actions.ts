@@ -2,10 +2,19 @@
 
 import { getNewsPool } from "@/lib/services/news.service";
 import { getMediaPool } from "@/lib/services/media.service";
-import { toNewsContentItem, toVideoContentItem } from "@/lib/providers/social/content-builders";
+import { getMatch, getUpcomingMatches, getRecentResults } from "@/lib/services/matches.service";
+import {
+  toNewsContentItem,
+  toVideoContentItem,
+  toMatchResultContentItem,
+  toGoalContentItem,
+  toMatchSummaryContentItem,
+  toImageContentItem,
+} from "@/lib/providers/social/content-builders";
 import { encodeNewsId } from "@/lib/news-id";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
-import type { ContentItem } from "@/lib/providers/social/types";
+import type { ContentItem, Attachment } from "@/lib/providers/social/types";
+import type { Match } from "@/lib/types";
 import { getAdminSession } from "@/lib/admin/session";
 import {
   listContentDrafts,
@@ -14,6 +23,7 @@ import {
   publishContentDraft,
   archiveContentDraft,
   type ContentDraft,
+  type ContentDraftKind,
   type ContentDestination,
 } from "@/lib/admin/content-drafts";
 
@@ -110,9 +120,10 @@ export async function fetchAdminContent(input: {
 }
 
 /**
- * Content Studio — المرحلة الأولى (NEWS فقط). كل دالة هنا تتحقّق من جلسة
- * Admin بنفسها (لا تعتمد على حماية الصفحة وحدها) — Server Actions قابلة
- * للاستدعاء المباشر بمعزل عن الصفحة التي عرضت الزر.
+ * Content Studio — الموجة الأولى من المصادر الحرة: NEWS/IMAGE (يدوي أو رابط)
+ * وMATCH_RESULT/GOAL/MATCH_SUMMARY (من مباراة حقيقية). كل دالة هنا تتحقّق من
+ * جلسة Admin بنفسها (لا تعتمد على حماية الصفحة وحدها) — Server Actions
+ * قابلة للاستدعاء المباشر بمعزل عن الصفحة التي عرضت الزر.
  */
 
 async function requireAdminUsername(): Promise<string> {
@@ -121,20 +132,20 @@ async function requireAdminUsername(): Promise<string> {
   return session.username;
 }
 
-export type NewsDraftActionResult = { draft: ContentDraft } | { error: string };
+export type DraftActionResult = { draft: ContentDraft } | { error: string };
 
-export async function listNewsDraftsAction(): Promise<ContentDraft[]> {
+export async function listContentDraftsAction(): Promise<ContentDraft[]> {
   await requireAdminUsername();
-  const drafts = await listContentDrafts();
-  return drafts.filter((d) => d.kind === "NEWS");
+  return listContentDrafts();
 }
 
 /** استيراد خبر من رابط — بنفس آلية fetchAdminContent أعلاه بالضبط (مطابقة
- * ضمن مجمّع RSS الحقيقي المُهيَّأ أصلاً، لا جلب/scraping لرابط عام). */
+ * ضمن مجمّع RSS الحقيقي المُهيَّأ أصلاً، لا جلب/scraping لرابط عام). يبقى
+ * NEWS فقط — استيراد الرابط العام خارج نطاق هذه الموجة. */
 export async function createNewsDraftFromUrlAction(input: {
   newsUrl: string;
   destinations: ContentDestination[];
-}): Promise<NewsDraftActionResult> {
+}): Promise<DraftActionResult> {
   const createdBy = await requireAdminUsername();
   const newsUrl = input.newsUrl.trim();
   if (!newsUrl) return { error: "empty" };
@@ -159,32 +170,41 @@ export async function createNewsDraftFromUrlAction(input: {
   return { draft };
 }
 
-/** إنشاء خبر يدوياً — لا مصدر خارجي، المحرِّر هو المصدر (source: "Extra Time"). */
-export async function createManualNewsDraftAction(input: {
+/** إنشاء خبر أو صورة يدوياً — لا مصدر خارجي. صورة تتطلّب رابط صورة حقيقياً
+ * (لا معنى لعنصر IMAGE بلا صورة). */
+export async function createManualDraftAction(input: {
+  kind: "NEWS" | "IMAGE";
   title: string;
   summary: string;
   imageUrl: string;
   destinations: ContentDestination[];
-}): Promise<NewsDraftActionResult> {
+}): Promise<DraftActionResult> {
   const createdBy = await requireAdminUsername();
   const title = input.title.trim();
   if (!title) return { error: "empty" };
   if (input.destinations.length === 0) return { error: "no_destination" };
 
   const locale = await getServerLocale();
-  const baseContent: ContentItem = {
-    id: "manual-pending",
-    kind: "NEWS",
-    title,
-    summary: input.summary.trim() || undefined,
-    imageUrl: input.imageUrl.trim() || null,
-    publishedAt: new Date().toISOString(),
-    language: locale,
-    data: { source: "Extra Time", category: "FOOTBALL" },
-  };
+  let baseContent: ContentItem | null;
+
+  if (input.kind === "IMAGE") {
+    baseContent = toImageContentItem({ title, imageUrl: input.imageUrl, caption: input.summary.trim() || undefined });
+    if (!baseContent) return { error: "image_required" };
+  } else {
+    baseContent = {
+      id: "manual-pending",
+      kind: "NEWS",
+      title,
+      summary: input.summary.trim() || undefined,
+      imageUrl: input.imageUrl.trim() || null,
+      publishedAt: new Date().toISOString(),
+      language: locale,
+      data: { source: "Extra Time", category: "FOOTBALL" },
+    };
+  }
 
   const draft = await createContentDraft({
-    kind: "NEWS",
+    kind: input.kind,
     sourceType: "MANUAL",
     sourceRef: null,
     baseContent,
@@ -195,10 +215,93 @@ export async function createManualNewsDraftAction(input: {
   return { draft };
 }
 
-export async function updateNewsDraftAction(
+/** بحث مباريات حقيقية (نتائج أخيرة + مباريات الأسبوع) لمحرّر المباراة — نفس
+ * آلية substring المستخدَمة في /search، بلا provider جديد. */
+export async function searchMatchesAction(query: string): Promise<Match[]> {
+  await requireAdminUsername();
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+
+  const [recent, week] = await Promise.all([getRecentResults(), getUpcomingMatches("week")]);
+  const seen = new Set<string>();
+  const matches: Match[] = [];
+  for (const m of [...recent.matches, ...week.matches]) {
+    if (seen.has(m.id)) continue;
+    const haystack = `${m.homeTeam.name} ${m.awayTeam.name}`.toLowerCase();
+    if (!haystack.includes(q)) continue;
+    seen.add(m.id);
+    matches.push(m);
+  }
+  return matches.slice(0, 20);
+}
+
+/** تفاصيل مباراة كاملة (بأحداثها) بعد اختيارها من نتائج البحث — getMatch
+ * (خلافاً لقوائم البحث) يجلب الأحداث الحقيقية أيضاً. لا تعديل على المباراة
+ * نفسها هنا إطلاقاً — للعرض فقط. */
+export async function getMatchDetailAction(matchId: string): Promise<Match | null> {
+  await requireAdminUsername();
+  const { match } = await getMatch(matchId);
+  return match;
+}
+
+/** إنشاء Draft من مباراة حقيقية — MATCH_RESULT (نتيجة نهائية فقط)، GOAL
+ * (حدث هدف حقيقي من أحداث المباراة)، أو MATCH_SUMMARY (نص تحريري من
+ * المحرِّر مربوط ببيانات المباراة الحقيقية). لا تعديل على بيانات المباراة
+ * الأصلية بأي شكل — أي نص تحريري لاحق يذهب إلى overrides عبر updateDraftAction. */
+export async function createMatchDraftAction(input: {
+  kind: "MATCH_RESULT" | "GOAL" | "MATCH_SUMMARY";
+  matchId: string;
+  eventId?: string;
+  title?: string;
+  summary?: string;
+  destinations: ContentDestination[];
+}): Promise<DraftActionResult> {
+  const createdBy = await requireAdminUsername();
+  if (input.destinations.length === 0) return { error: "no_destination" };
+
+  const { match } = await getMatch(input.matchId);
+  if (!match) return { error: "match_not_found" };
+
+  let baseContent: ContentItem | null;
+  if (input.kind === "MATCH_RESULT") {
+    baseContent = toMatchResultContentItem(match);
+    if (!baseContent) return { error: "match_not_finished" };
+  } else if (input.kind === "GOAL") {
+    const event = match.events.find((e) => e.id === input.eventId);
+    if (!event) return { error: "event_not_found" };
+    baseContent = toGoalContentItem(match, event);
+    if (!baseContent) return { error: "goal_data_incomplete" };
+  } else {
+    const title = input.title?.trim();
+    if (!title) return { error: "empty" };
+    baseContent = toMatchSummaryContentItem(match, { title, summary: input.summary?.trim() });
+  }
+
+  const draft = await createContentDraft({
+    kind: input.kind as ContentDraftKind,
+    sourceType: "MATCH",
+    sourceRef: input.matchId,
+    baseContent,
+    destinations: input.destinations,
+    createdBy,
+  });
+  if (!draft) return { error: "create_failed" };
+  return { draft };
+}
+
+/** تحديث عام يعمل لأي نوع Draft — الحقول (عنوان/ملخص/صورة/مرفقات/وجهة) نفسها
+ * بغضّ النظر عن kind، فالفرع الوحيد الخاص بالنوع هو baseContent المُجمَّد
+ * عند الإنشاء (لا يتغيّر)، لا overrides. */
+export async function updateDraftAction(
   id: string,
-  input: { title: string; summary: string; imageUrl: string; destinations: ContentDestination[] }
-): Promise<NewsDraftActionResult> {
+  input: {
+    title: string;
+    summary: string;
+    imageUrl: string;
+    destinations: ContentDestination[];
+    attachments?: Attachment[];
+  }
+): Promise<DraftActionResult> {
   await requireAdminUsername();
   const title = input.title.trim();
   if (!title) return { error: "empty" };
@@ -209,19 +312,19 @@ export async function updateNewsDraftAction(
     summary: input.summary.trim() || undefined,
     imageUrl: input.imageUrl.trim() || null,
   };
-  const draft = await updateContentDraft(id, { overrides, destinations: input.destinations });
+  const draft = await updateContentDraft(id, { overrides, destinations: input.destinations, attachments: input.attachments });
   if (!draft) return { error: "update_failed" };
   return { draft };
 }
 
-export async function publishNewsDraftAction(id: string): Promise<NewsDraftActionResult> {
+export async function publishDraftAction(id: string): Promise<DraftActionResult> {
   await requireAdminUsername();
   const draft = await publishContentDraft(id);
   if (!draft) return { error: "publish_failed" };
   return { draft };
 }
 
-export async function archiveNewsDraftAction(id: string): Promise<NewsDraftActionResult> {
+export async function archiveDraftAction(id: string): Promise<DraftActionResult> {
   await requireAdminUsername();
   const draft = await archiveContentDraft(id);
   if (!draft) return { error: "archive_failed" };

@@ -89,6 +89,39 @@ export function buildStoryLayout(item: ContentItem, locale: "ar" | "en" = "ar"):
       };
     }
 
+    case "MATCH_SUMMARY": {
+      const headline = str(item.title);
+      if (!headline) return null;
+
+      const homeScore = num(item.data?.homeScore);
+      const awayScore = num(item.data?.awayScore);
+
+      return {
+        template: "MATCH_SUMMARY",
+        dir,
+        headline,
+        subline: str(item.summary),
+        imageUrl: item.imageUrl ?? null,
+        homeTeamName: str(item.data?.homeTeam),
+        awayTeamName: str(item.data?.awayTeam),
+        scoreText: homeScore !== undefined && awayScore !== undefined ? `${homeScore}-${awayScore}` : undefined,
+      };
+    }
+
+    case "IMAGE": {
+      const headline = str(item.title);
+      // صورة بلا صورة فعلية لا تصلح لهذا القالب أصلاً — لا صورة بديلة مُختلَقة.
+      if (!headline || !item.imageUrl) return null;
+
+      return {
+        template: "IMAGE",
+        dir,
+        headline,
+        subline: str(item.summary),
+        imageUrl: item.imageUrl,
+      };
+    }
+
     // TRANSFER غير مدعوم بعد (لا مولّد Story له حالياً — راجع خطة Phase 3).
     default:
       return null;

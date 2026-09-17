@@ -1,5 +1,5 @@
 import { getServerLocale, getMessages } from "@/lib/i18n/getServerLocale";
-import { listNewsDraftsAction } from "@/lib/actions/admin-content.actions";
+import { listContentDraftsAction } from "@/lib/actions/admin-content.actions";
 import { ContentStudioClient } from "@/components/admin/ContentStudioClient";
 import { VideoQuickShare } from "@/components/admin/VideoQuickShare";
 
@@ -17,7 +17,7 @@ export async function generateMetadata() {
  */
 export default async function AdminContentPage() {
   const t = getMessages(await getServerLocale());
-  const drafts = await listNewsDraftsAction();
+  const drafts = await listContentDraftsAction();
 
   return (
     <div className="container-page py-6 md:py-10 max-w-5xl space-y-14">

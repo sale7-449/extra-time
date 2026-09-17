@@ -4,7 +4,7 @@
  * (لا قيمة افتراضية/بديلة أبداً)، والراسم يتجاهل أي حقل undefined تماماً
  * بدل رسم عنصر فارغ/مكسور مكانه.
  */
-export type StoryTemplate = "MATCH_RESULT" | "GOAL" | "NEWS" | "VIDEO";
+export type StoryTemplate = "MATCH_RESULT" | "GOAL" | "NEWS" | "VIDEO" | "MATCH_SUMMARY" | "IMAGE";
 
 export interface StoryLayout {
   template: StoryTemplate;

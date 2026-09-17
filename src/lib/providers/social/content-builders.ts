@@ -59,6 +59,45 @@ export function toGoalContentItem(match: Match, event: MatchEvent): ContentItem 
   };
 }
 
+/** ملخص/تقرير مباراة تحريري — النص من المحرِّر دائماً (لا اختلاق تلخيص
+ * آلي)، وبيانات الفرق/النتيجة/البطولة من المباراة الحقيقية نفسها فقط. */
+export function toMatchSummaryContentItem(match: Match, text: { title: string; summary?: string }): ContentItem {
+  return {
+    id: `match-summary-${match.id}`,
+    kind: "MATCH_SUMMARY",
+    title: text.title,
+    summary: text.summary,
+    sourceUrl: `/matches/${match.id}`,
+    publishedAt: match.kickoff,
+    data: {
+      homeTeam: match.homeTeam.name,
+      awayTeam: match.awayTeam.name,
+      homeTeamLogo: match.homeTeam.logoUrl,
+      awayTeamLogo: match.awayTeam.logoUrl,
+      homeScore: match.homeScore,
+      awayScore: match.awayScore,
+      competitionId: match.competitionId,
+      matchId: match.id,
+      status: match.status,
+    },
+  };
+}
+
+/** صورة مستقلة — تحتاج رابط صورة حقيقياً دائماً، وإلا فلا معنى للعنصر أصلاً. */
+export function toImageContentItem(input: { title: string; imageUrl: string; caption?: string }): ContentItem | null {
+  const imageUrl = input.imageUrl.trim();
+  if (!imageUrl) return null;
+
+  return {
+    id: `image-${Date.now()}`,
+    kind: "IMAGE",
+    title: input.title,
+    summary: input.caption,
+    imageUrl,
+    publishedAt: new Date().toISOString(),
+  };
+}
+
 export function toNewsContentItem(article: NewsArticle): ContentItem {
   return {
     id: `news-${article.id}`,

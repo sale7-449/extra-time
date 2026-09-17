@@ -12,7 +12,15 @@
  * لا تُنشئ أي صنف يُنفّذ SocialContentGenerator قبل ربط منصة حقيقية فعلياً.
  */
 
-export type ContentItemKind = "NEWS" | "MATCH_RESULT" | "GOAL" | "TRANSFER" | "VIDEO";
+export type ContentItemKind = "NEWS" | "MATCH_RESULT" | "GOAL" | "MATCH_SUMMARY" | "IMAGE" | "TRANSFER" | "VIDEO";
+
+/** عنصر إضافي اختياري فوق المحتوى الأساسي (Content Studio) — يتيح تركيبات
+ * حرة (نص+صورة، مباراة+رابط...) بلا حاجة لنوع ContentItem جديد لكل تركيبة. */
+export interface Attachment {
+  type: "IMAGE" | "VIDEO" | "LINK";
+  url: string;
+  caption?: string;
+}
 
 export interface ContentItem {
   id: string;
@@ -26,6 +34,8 @@ export interface ContentItem {
   /** بيانات خاصة بالنوع (مثلاً {homeTeam, awayTeam, score} لنتيجة مباراة) —
    * كل حقل هنا من بيانات حقيقية فعلية فقط، لا اختلاق. */
   data?: Record<string, unknown>;
+  /** عناصر إضافية اختيارية (Content Studio) — راجع Attachment أعلاه. */
+  attachments?: Attachment[];
 }
 
 export type SocialPlatform = "X" | "YOUTUBE" | "SNAPCHAT";

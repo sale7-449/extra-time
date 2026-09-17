@@ -280,6 +280,24 @@ async function drawVideo(ctx: CanvasRenderingContext2D, layout: StoryLayout, col
   drawPlayButton(ctx, STORY_WIDTH / 2, STORY_HEIGHT * 0.3, 90, colors);
 }
 
+/** نفس تخطيط NEWS بالضبط + سطر فرق/نتيجة سفلي إن توفّرا — لا قالب رسم جديد
+ * منفصل، فقط إضافة صغيرة فوق drawNews الموجودة. */
+async function drawMatchSummary(ctx: CanvasRenderingContext2D, layout: StoryLayout, colors: BrandColors, fontFamily: string) {
+  await drawNews(ctx, layout, colors, fontFamily);
+
+  if (layout.homeTeamName && layout.awayTeamName) {
+    ctx.textAlign = "center";
+    ctx.font = `600 34px ${fontFamily}`;
+    ctx.fillStyle = colors.mutedDim;
+    const line = layout.scoreText
+      ? `${layout.homeTeamName} ${layout.scoreText} ${layout.awayTeamName}`
+      : `${layout.homeTeamName} × ${layout.awayTeamName}`;
+    ctx.direction = "ltr";
+    ctx.fillText(line, STORY_WIDTH / 2, STORY_HEIGHT - 100);
+    ctx.direction = layout.dir;
+  }
+}
+
 /**
  * الراسم الفعلي — يعمل داخل المتصفح فقط (Image/document.fonts/Canvas 2D).
  * مستقل تماماً عن React: يقبل عنصر canvas حقيقي و Layout جاهز، لا مكوّن ولا
@@ -326,6 +344,12 @@ export async function renderStoryToCanvas(canvas: HTMLCanvasElement, layout: Sto
       break;
     case "VIDEO":
       await drawVideo(ctx, layout, colors, fontFamily);
+      break;
+    case "MATCH_SUMMARY":
+      await drawMatchSummary(ctx, layout, colors, fontFamily);
+      break;
+    case "IMAGE":
+      await drawNews(ctx, layout, colors, fontFamily);
       break;
   }
 }
