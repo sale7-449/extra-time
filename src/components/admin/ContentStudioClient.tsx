@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { MatchStatusBadge } from "@/components/shared/MatchStatusBadge";
 import { StoryTrigger } from "@/components/story/StoryTrigger";
+import { MediaUploadField } from "@/components/admin/MediaUploadField";
 import { isAllowedImageHost } from "@/lib/image-hosts";
 import { resolveContentItem } from "@/lib/providers/social/content-builders";
 import {
@@ -147,6 +148,10 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   const [drafts, setDrafts] = useState(initialDrafts);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const activeDraft = drafts.find((d) => d.id === activeDraftId) ?? null;
+  // مجلد رفع مؤقت وآمن لملفات تُرفَع أثناء الإنشاء (قبل وجود id مسودة حقيقي
+  // بعد) — نفس شكل مسار content-media/<draft-id>/<اسم> تماماً، فقط بمفتاح
+  // مؤقت بدل id نهائي غير موجود بعد.
+  const [uploadFolder] = useState(() => crypto.randomUUID());
 
   // اختيار الموضوع
   const [subject, setSubject] = useState<SubjectType | null>(null);
@@ -177,6 +182,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   const [selectedEventId, setSelectedEventId] = useState<string>("");
   const [summaryTitle, setSummaryTitle] = useState("");
   const [summaryText, setSummaryText] = useState("");
+  const [summaryImage, setSummaryImage] = useState("");
 
   // أندية — مُصنَّفة حسب الدوري أولاً
   const [teamGroups, setTeamGroups] = useState<{ groups: TeamsByCompetitionGroup[]; other: Team[] } | null>(null);
@@ -219,6 +225,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     setSelectedEventId("");
     setSummaryTitle("");
     setSummaryText("");
+    setSummaryImage("");
     setSelectedLeagueId(null);
     setTeamFilter("");
     setSelectedTeam(null);
@@ -384,6 +391,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
           eventId: kind === "GOAL" ? selectedEventId : undefined,
           title: kind === "MATCH_SUMMARY" ? summaryTitle : undefined,
           summary: kind === "MATCH_SUMMARY" ? summaryText : undefined,
+          imageUrl: kind === "MATCH_SUMMARY" ? summaryImage : undefined,
           destinations: createDestinations,
         })
       );
@@ -503,17 +511,15 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
           <textarea value={manualSummary} onChange={(e) => setManualSummary(e.target.value)} rows={3} className={textareaClass} />
         </div>
         {manualKind === "VIDEO" && (
-          <div>
-            <label className="block text-sm font-bold mb-1.5">{t.admin.manualVideoLabel}</label>
-            <Input type="url" dir="ltr" value={manualVideoUrl} onChange={(e) => setManualVideoUrl(e.target.value)} placeholder="https://..." />
-          </div>
+          <MediaUploadField kind="VIDEO" value={manualVideoUrl} onChange={setManualVideoUrl} folder={uploadFolder} label={t.admin.manualVideoLabel} />
         )}
-        <div>
-          <label className="block text-sm font-bold mb-1.5">
-            {manualKind === "IMAGE" ? t.admin.manualImageLabel : t.admin.manualImageLabelOptional}
-          </label>
-          <Input type="url" dir="ltr" value={manualImage} onChange={(e) => setManualImage(e.target.value)} placeholder="https://..." />
-        </div>
+        <MediaUploadField
+          kind="IMAGE"
+          value={manualImage}
+          onChange={setManualImage}
+          folder={uploadFolder}
+          label={manualKind === "IMAGE" ? t.admin.manualImageLabel : t.admin.manualImageLabelOptional}
+        />
         <div>
           <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
           <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
@@ -721,6 +727,13 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                           <label className="block text-sm font-bold mb-1.5">{t.admin.matchSummaryTextLabel}</label>
                           <textarea value={summaryText} onChange={(e) => setSummaryText(e.target.value)} rows={4} className={textareaClass} />
                         </div>
+                        <MediaUploadField
+                          kind="IMAGE"
+                          value={summaryImage}
+                          onChange={setSummaryImage}
+                          folder={uploadFolder}
+                          label={t.admin.manualImageLabelOptional}
+                        />
                         <div>
                           <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
                           <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
@@ -778,6 +791,9 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                         {t.admin.changeLeague}
                       </button>
                     </div>
+                    {selectedLeagueId !== "OTHER" && teamGroups.groups.find((g) => g.competitionId === selectedLeagueId)?.isPartial && (
+                      <p className="text-xs text-warning">{t.admin.partialTeamListNote}</p>
+                    )}
                     <Input value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} placeholder={t.admin.teamSearchPlaceholder} />
                     {(() => {
                       const teams =
@@ -947,10 +963,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                   <textarea id="edit-summary" value={editSummary} onChange={(e) => setEditSummary(e.target.value)} rows={3} className={textareaClass} />
                 </div>
                 <div>
-                  <label htmlFor="edit-image" className="block text-sm font-bold mb-1.5">
-                    {t.admin.manualImageLabelOptional}
-                  </label>
-                  <Input id="edit-image" type="url" dir="ltr" value={editImage} onChange={(e) => setEditImage(e.target.value)} placeholder="https://..." />
+                  <MediaUploadField kind="IMAGE" value={editImage} onChange={setEditImage} folder={activeDraft.id} label={t.admin.manualImageLabelOptional} />
                   {editImage && !isAllowedImageHost(editImage) && <p className="text-xs text-warning mt-1">{t.admin.imageHostWarning}</p>}
                 </div>
 

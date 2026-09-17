@@ -16,6 +16,8 @@ import { encodeNewsId } from "@/lib/news-id";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
 import { COMPETITION_CATALOG } from "@/lib/providers/football/competition-catalog";
 import { canonicalCompetitionId, tagId } from "@/lib/providers/football/ids";
+import { getTeamsByCompetition } from "@/lib/providers/football";
+import { uploadContentMedia } from "@/lib/admin/content-media-storage";
 import type { ContentItem, Attachment } from "@/lib/providers/social/types";
 import type { Match, Team } from "@/lib/types";
 import { getAdminSession } from "@/lib/admin/session";
@@ -289,21 +291,16 @@ export interface TeamsByCompetitionGroup {
   /** معرّف بطولة موسوم (af-140...) — لعرض اسمها عبر localizeCompetitionShortName. */
   competitionId: string;
   teams: Team[];
+  /** true = تعذّر جلب التشكيلة الكاملة الحقيقية للبطولة (كلا المصدرين)،
+   * فهذه قائمة جزئية مُستخلَصة من مباريات النافذة الحالية فقط — لا تُعامَل
+   * كقائمة كاملة. */
+  isPartial: boolean;
 }
 
-/**
- * أندية حقيقية مُصنَّفة حسب الدوري/المسابقة الحقيقية أولاً — تُستخلَص من نفس
- * تجمّع المباريات (لا دليل أندية مستقل في المنصة بعد)، مُجمَّعة عبر
- * canonicalCompetitionId لتوحيد نفس البطولة القادمة من مصادر مختلفة
- * (af/tsdb). نادٍ لا تُحَل بطولته لأي عنصر في الكتالوج (نادر، غالباً بيانات
- * مصدر ثانوي) يظهر صراحة ضمن "other" بدل تصنيف مُخترَع. نادٍ بلا أي مباراة
- * ضمن هذه النافذة الزمنية لن يظهر بعد — قيد بيانات حقيقي، لا نتغلّب عليه
- * باختلاق نادٍ أو بطولة. نادٍ يلعب في أكثر من مسابقة يظهر بمعرّفه الحقيقي
- * نفسه تحت كل مسابقة لعب فيها فعلاً — لا نسخ مُصطنَعة، مجرّد انعكاس للواقع.
- */
-export async function listTeamsByCompetitionAction(): Promise<{ groups: TeamsByCompetitionGroup[]; other: Team[] }> {
-  await requireAdminUsername();
-
+/** بديل جزئي صادق (لا اختلاق) عند تعذّر قائمة الأندية الكاملة الحقيقية لكل
+ * بطولات الكتالوج معاً — استخلاص من مباريات النافذة الحالية (نتائج أخيرة +
+ * أسبوع قادم)، مُجمَّع عبر canonicalCompetitionId. */
+async function derivePartialTeamsFromMatchPool(): Promise<{ byCanonical: Map<string, Map<string, Team>>; other: Map<string, Team> }> {
   const [recent, week] = await Promise.all([getRecentResults(), getUpcomingMatches("week")]);
   const byCanonical = new Map<string, Map<string, Team>>();
   const other = new Map<string, Team>();
@@ -318,13 +315,52 @@ export async function listTeamsByCompetitionAction(): Promise<{ groups: TeamsByC
     }
     if (canonical && bucket) byCanonical.set(canonical, bucket);
   }
+  return { byCanonical, other };
+}
 
-  const groups: TeamsByCompetitionGroup[] = COMPETITION_CATALOG.filter((e) => e.afId !== undefined && byCanonical.has(String(e.afId))).map((e) => ({
-    competitionId: tagId("af", e.afId!),
-    teams: [...byCanonical.get(String(e.afId))!.values()].sort((a, b) => a.name.localeCompare(b.name)),
-  }));
+/**
+ * أندية حقيقية مُصنَّفة حسب الدوري/المسابقة أولاً. لكل بطولة في الكتالوج
+ * تُجرَّب أولاً تشكيلتها الكاملة الحقيقية للموسم الحالي (getTeamsByCompetition
+ * — API-Football ثم TheSportsDB) بدل الاكتفاء بمن لعب ضمن نافذة مباريات
+ * محدودة؛ فقط إن تعذّر كلا المصدرين (تعطّل مؤقت/حساب) تُستخدَم القائمة
+ * الجزئية المُستخلَصة من تجمّع المباريات كحل احتياطي صريح (isPartial=true)،
+ * لا كإسقاط صامت لأندية حقيقية. نادٍ لا تُحَل بطولته لأي عنصر في الكتالوج
+ * يظهر صراحة ضمن "other". نادٍ يلعب في أكثر من مسابقة يظهر بمعرّفه الحقيقي
+ * نفسه تحت كل مسابقة لعب فيها فعلاً — لا نسخ مُصطنَعة.
+ */
+export async function listTeamsByCompetitionAction(): Promise<{ groups: TeamsByCompetitionGroup[]; other: Team[] }> {
+  await requireAdminUsername();
 
-  return { groups, other: [...other.values()].sort((a, b) => a.name.localeCompare(b.name)) };
+  let fallback: { byCanonical: Map<string, Map<string, Team>>; other: Map<string, Team> } | null = null;
+
+  const groups: TeamsByCompetitionGroup[] = [];
+  for (const entry of COMPETITION_CATALOG) {
+    if (entry.afId === undefined) continue;
+
+    const fullList = await getTeamsByCompetition({ afId: entry.afId });
+    if (fullList && fullList.length > 0) {
+      groups.push({
+        competitionId: tagId("af", entry.afId),
+        teams: [...fullList].sort((a, b) => a.name.localeCompare(b.name)),
+        isPartial: false,
+      });
+      continue;
+    }
+
+    // تعذّر المصدران الحقيقيان الكاملان لهذه البطولة تحديداً — احتياط جزئي.
+    fallback ??= await derivePartialTeamsFromMatchPool();
+    const partial = fallback.byCanonical.get(String(entry.afId));
+    if (partial && partial.size > 0) {
+      groups.push({
+        competitionId: tagId("af", entry.afId),
+        teams: [...partial.values()].sort((a, b) => a.name.localeCompare(b.name)),
+        isPartial: true,
+      });
+    }
+  }
+
+  const other = fallback ? [...fallback.other.values()].sort((a, b) => a.name.localeCompare(b.name)) : [];
+  return { groups, other };
 }
 
 /** تفاصيل مباراة كاملة (بأحداثها) بعد اختيارها — getMatch (خلافاً لقوائم
@@ -351,6 +387,7 @@ export async function createMatchSportDraftAction(input: {
   eventId?: string;
   title?: string;
   summary?: string;
+  imageUrl?: string;
   destinations: ContentDestination[];
 }): Promise<DraftActionResult> {
   const createdBy = await requireAdminUsername();
@@ -375,7 +412,7 @@ export async function createMatchSportDraftAction(input: {
   } else {
     const title = input.title?.trim();
     if (!title) return { error: "empty" };
-    overrides = { title, summary: input.summary?.trim() || undefined };
+    overrides = { title, summary: input.summary?.trim() || undefined, imageUrl: input.imageUrl?.trim() || undefined };
     placeholderTitle = title;
   }
 
@@ -466,4 +503,19 @@ export async function archiveDraftAction(id: string): Promise<DraftActionResult>
   const draft = await archiveContentDraft(id);
   if (!draft) return { error: "archive_failed" };
   return { draft };
+}
+
+/**
+ * رفع صورة/فيديو من جهاز المسؤول إلى Supabase Storage (bucket content-media)
+ * — بديل اختياري للرابط الخارجي، لا يُلغيه. نفس حماية Admin المطبَّقة على
+ * كل Server Action هنا (requireAdminUsername). `folder` هو id المسودة
+ * الحقيقي عند التعديل، أو مفتاح مؤقت آمن يُنشئه العميل قبل إنشاء المسودة.
+ */
+export async function uploadContentMediaAction(input: {
+  folder: string;
+  kind: "IMAGE" | "VIDEO";
+  file: File;
+}): Promise<{ url: string } | { error: string }> {
+  await requireAdminUsername();
+  return uploadContentMedia(input);
 }

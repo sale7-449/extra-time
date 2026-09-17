@@ -4,6 +4,19 @@
  * روابط قادمة من APIs خارجية (قد تُرجع مضيفاً غير مُدرَج بعد)، لتفادي
  * انهيار الصفحة كاملة عبر error boundary بسبب "Invalid src prop".
  */
+/** مضيف Supabase Storage نفسه (نفس مشروع NEXT_PUBLIC_SUPABASE_URL) — لصور/
+ * فيديوهات Content Studio المرفوعة من الجهاز إلى bucket content-media.
+ * مُشتَق من متغيّر البيئة بدل تثبيت مرجع مشروع حرفياً هنا. */
+const SUPABASE_STORAGE_HOST = (() => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!url) return null;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+})();
+
 export const REMOTE_IMAGE_HOSTS = [
   { hostname: "media.api-sports.io", note: "شعارات الأندية والبطولات القادمة من API-Football" },
   { hostname: "r2.thesportsdb.com", note: "شعارات ولاعبو TheSportsDB (مصدر بيانات ثانٍ)" },
@@ -16,6 +29,9 @@ export const REMOTE_IMAGE_HOSTS = [
   { hostname: "i2-prod.mirror.co.uk", note: "The Mirror" },
   { hostname: "cdnv.russiatoday.com", note: "RT Arabic" },
   { hostname: "*.ytimg.com", note: "صور مصغّرة لفيديوهات يوتيوب (قنوات رسمية)" },
+  ...(SUPABASE_STORAGE_HOST
+    ? [{ hostname: SUPABASE_STORAGE_HOST, note: "صور/فيديوهات Content Studio المرفوعة من الجهاز (Supabase Storage — bucket content-media)" }]
+    : []),
 ] as const;
 
 export function isAllowedImageHost(url: string | null | undefined): boolean {

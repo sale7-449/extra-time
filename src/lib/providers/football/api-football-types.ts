@@ -7,6 +7,11 @@ export interface ApiTeam {
   country?: string;
 }
 
+/** عنصر استجابة /teams?league=X&season=Y — قائمة أندية كاملة لبطولة/موسم. */
+export interface ApiTeamsResponseItem {
+  team: ApiTeam;
+}
+
 export interface ApiFixtureStatus {
   long: string;
   short: string;

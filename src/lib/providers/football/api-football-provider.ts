@@ -1,5 +1,5 @@
 import type { FootballProvider } from "./types";
-import type { Competition, Match, StandingsEntry } from "@/lib/types";
+import type { Competition, Match, StandingsEntry, Team } from "@/lib/types";
 import type {
   ApiEvent,
   ApiFixture,
@@ -8,6 +8,7 @@ import type {
   ApiStandingRow,
   ApiTeamLineup,
   ApiTeamStatistics,
+  ApiTeamsResponseItem,
 } from "./api-football-types";
 import {
   isLiveApiFootballStatus,
@@ -17,6 +18,7 @@ import {
   mapApiLineupsToLineups,
   mapApiStandingsToStandings,
   mapApiStatisticsToStats,
+  mapApiTeamToTeam,
 } from "./mappers";
 import { CATALOG_AF_IDS } from "./competition-catalog";
 
@@ -224,5 +226,15 @@ export class ApiFootballProvider implements FootballProvider {
     );
     const rows = entries[0]?.league?.standings?.[0] ?? [];
     return mapApiStandingsToStandings(rows);
+  }
+
+  /** قائمة أندية كاملة حقيقية لبطولة (موسم كامل، لا نافذة مباريات محدودة) —
+   * ميزة إضافية لمحرّر Content Studio فقط (اختيار نادٍ حسب الدوري)، منفصلة
+   * تماماً عن FootballProvider المشترك ولا تُغيّر أي منطق مباريات موجود.
+   * تخزين مؤقت طويل (يوم كامل) — تشكيلة الأندية في بطولة لا تتغيّر إلا مرة
+   * كل موسم تقريباً. */
+  async getTeamsByLeague(leagueId: number): Promise<Team[]> {
+    const entries = await this.request<ApiTeamsResponseItem>("/teams", { league: leagueId, season: CURRENT_SEASON }, 86400);
+    return entries.map((e) => mapApiTeamToTeam(e.team));
   }
 }

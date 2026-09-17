@@ -4,7 +4,7 @@ import { ApiFootballProvider } from "./api-football-provider";
 import { TheSportsDbProvider } from "./thesportsdb-provider";
 import { EspnProvider, findEspnEventId, getEspnEnrichment } from "./espn-provider";
 import { parseTaggedId, type ProviderTag } from "./ids";
-import type { Competition, Match, StandingsEntry } from "@/lib/types";
+import type { Competition, Match, StandingsEntry, Team } from "@/lib/types";
 
 const mock = new MockFootballProvider();
 const apiKey = process.env.API_FOOTBALL_KEY;
@@ -207,5 +207,34 @@ export const footballProvider: FootballProvider = {
 
 export const isUsingRealFootballData = REAL_PROVIDERS.length > 0;
 export const activeFootballSources = REAL_PROVIDERS.map((p) => p.tag);
+
+/**
+ * قائمة أندية كاملة حقيقية لبطولة من الكتالوج — ميزة إضافية لمحرّر Content
+ * Studio فقط (اختيار نادٍ حسب الدوري)، معزولة تماماً عن FootballProvider
+ * المشترك أعلاه: لا تُضاف لواجهته (لا Mock ولا ESPN يطبّقانها)، ولا تُغيّر أي
+ * سطر من منطق المباريات الحالي.
+ *
+ * API-Football فقط حالياً (موسم كامل، /teams?league=X&season=Y) — تحقّق
+ * فعلي (curl مباشر) أثبت أن TheSportsDB لا يدعم /lookup_all_teams.php
+ * بمعرّف دوري فعلي على المفتاح العام المجاني المُستخدَم هنا: يُعيد **نفس**
+ * القائمة الثابتة حرفياً بغضّ النظر عن id الدوري المُرسَل (تحقّق مباشر: نفس
+ * الفرق الإنجليزية ظهرت لكل من الدوري السعودي والإنجليزي معاً) — عرضها
+ * كتشكيلة "حقيقية" لبطولة أخرى كان سيكون تضليلاً فعلياً، لا مجرّد نقص
+ * بيانات، فاستُبعِد عمداً بدل استخدامه. عند تعذّر API-Football (كما هو
+ * حالياً بسبب قيود الحساب الموثَّقة مسبقاً)، تعود null صراحة — المستدعي
+ * (listTeamsByCompetitionAction) يتراجع حينها لقائمة جزئية صادقة من تجمّع
+ * المباريات، لا اختلاق أي نادٍ.
+ */
+export async function getTeamsByCompetition(entry: { afId?: number }): Promise<Team[] | null> {
+  if (apiFootball && entry.afId !== undefined) {
+    try {
+      const teams = await apiFootball.getTeamsByLeague(entry.afId);
+      if (teams.length > 0) return teams;
+    } catch (error) {
+      console.error(`[football] af failed for getTeamsByLeague(${entry.afId}):`, error);
+    }
+  }
+  return null;
+}
 
 export type { FootballProvider, Match, Competition, StandingsEntry };
