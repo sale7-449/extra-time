@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { MatchStatusBadge } from "@/components/shared/MatchStatusBadge";
-import { StoryTrigger } from "@/components/story/StoryTrigger";
+import { SnapchatShareButton } from "@/components/admin/SnapchatShareButton";
 import { MediaUploadField } from "@/components/admin/MediaUploadField";
 import { isAllowedImageHost } from "@/lib/image-hosts";
 import { resolveContentItem } from "@/lib/providers/social/content-builders";
@@ -1119,7 +1119,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                   <div>
                     <p className="text-sm font-bold mb-2">{t.admin.snapchatPreviewTitle}</p>
                     <p className="text-xs text-muted-dim mb-2">{t.admin.snapchatPreviewHint}</p>
-                    <StoryTrigger item={previewItem} label={t.story.snapchat} modalTitle={t.story.newsTitle} />
+                    <SnapchatShareButton item={previewItem} />
                   </div>
                 )}
               </div>
