@@ -21,7 +21,7 @@ import { SnapchatCreativeKitButton } from "@/components/story/SnapchatCreativeKi
 import { toMatchResultContentItem, toGoalContentItem } from "@/lib/providers/social/content-builders";
 import { isFavorited } from "@/lib/services/favorites.service";
 import { BackIcon } from "@/components/icons";
-import { formatKickoffTime } from "@/lib/utils";
+import { formatKickoffTime, formatMatchDate } from "@/lib/utils";
 import { getServerLocale, getMessages } from "@/lib/i18n/getServerLocale";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -145,7 +145,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
                   بما يكفي لكسر التخطيط أفقياً على 375px مع أسماء فرق طويلة
                   (Rayo Vallecano) — تأكَّد الأمر فعلياً عبر لقطة شاشة حقيقية. */}
               <span className="text-xs font-bold text-muted tabular whitespace-nowrap" dir="ltr">
-                {new Date(match.kickoff).toLocaleDateString(locale === "ar" ? "ar-SA" : "en-US", { day: "numeric", month: "long" })}
+                {formatMatchDate(match.kickoff, locale)}
                 {" · "}
                 {formatKickoffTime(match.kickoff, locale)}
               </span>

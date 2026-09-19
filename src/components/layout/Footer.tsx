@@ -4,7 +4,9 @@ import Link from "next/link";
 import { Logo } from "@/components/shared/Logo";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 
-export function Footer() {
+/** `year` يُحسَب على الخادم ويصل كـprop مُسلسَل، فيتطابق رسم العميل مع الخادم
+ * حتى عند تخطّي منتصف ليلة رأس السنة بين الرسمين. */
+export function Footer({ year }: { year: number }) {
   const { t } = useLocale();
 
   return (
@@ -21,7 +23,7 @@ export function Footer() {
           <Link href="/competitions" className="hover:text-ink transition-colors">{t.nav.competitions}</Link>
           <Link href="/stats" className="hover:text-ink transition-colors">{t.nav.stats}</Link>
         </nav>
-        <p className="text-xs text-muted-dim">© {new Date().getFullYear()} Extra Time</p>
+        <p className="text-xs text-muted-dim">© {year} Extra Time</p>
       </div>
     </footer>
   );

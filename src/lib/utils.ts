@@ -30,14 +30,33 @@ export function formatWeekDayHeading(iso: string, locale: Locale, todayLabel: st
   return weekdayDate;
 }
 
+/** وقت الانطلاق بتوقيت الرياض دائماً — بلا اعتماد على منطقة الخادم (UTC) ولا
+ * منطقة جهاز الزائر، فيتطابق ناتج الخادم والعميل حرفياً (بلا hydration
+ * mismatch) ويرى كل الزوار نفس الوقت. hourCycle h23 بدل hour12:false لأن
+ * بعض المحركات تُخرج "24:30" لمنتصف الليل مع الثانية. */
 export function formatKickoffTime(iso: string, locale: Locale = "ar"): string {
   return new Date(iso).toLocaleTimeString(locale === "ar" ? "ar-SA" : "en-US", {
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
+    hourCycle: "h23",
+    timeZone: DISPLAY_TZ,
   });
 }
 
+/** تاريخ يوم/شهر بتوقيت الرياض وتقويم ميلادي صريح — نفس ضمانة التطابق بين
+ * الخادم والعميل (تقويم ar-SA الافتراضي يختلف بين إصدارات ICU/المتصفحات). */
+export function formatMatchDate(iso: string, locale: Locale = "ar"): string {
+  return new Date(iso).toLocaleDateString(locale === "ar" ? "ar-SA" : "en-US", {
+    day: "numeric",
+    month: "long",
+    calendar: "gregory",
+    timeZone: DISPLAY_TZ,
+  });
+}
+
+/** الوقت النسبي ("قبل 12 دقيقة") يعتمد على Date.now() فلا يجوز أن يُرسَم على
+ * الخادم ثم يُعاد رسمه على العميل بقيمة مختلفة — في مكوّنات العميل استخدم
+ * <RelativeTime> (components/shared/RelativeTime.tsx) لا هذه الدالة مباشرة. */
 export function formatRelativeTime(iso: string, locale: Locale = "ar"): string {
   const t = messages[locale].common;
   const diffMs = Date.now() - new Date(iso).getTime();

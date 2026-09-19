@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import type { MediaItem } from "@/lib/types";
-import { formatRelativeTime } from "@/lib/utils";
+import { RelativeTime } from "@/components/shared/RelativeTime";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { PlayIcon } from "@/components/icons";
 import { VideoModal } from "./VideoModal";
@@ -98,8 +98,8 @@ export function MediaCard({ item }: { item: MediaItem }) {
           <h3 className="text-sm font-extrabold leading-snug line-clamp-2 group-hover:text-primary transition-colors">
             {item.title}
           </h3>
-          <p suppressHydrationWarning className="mt-2 text-xs text-muted-dim">
-            {item.source} · {formatRelativeTime(item.publishedAt, locale)}
+          <p className="mt-2 text-xs text-muted-dim">
+            {item.source} · <RelativeTime iso={item.publishedAt} locale={locale} />
           </p>
         </div>
       </button>

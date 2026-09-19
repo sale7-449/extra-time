@@ -14,8 +14,8 @@ import { SnapchatShareButton } from "@/components/admin/SnapchatShareButton";
 import { MediaUploadField } from "@/components/admin/MediaUploadField";
 import { isAllowedImageHost } from "@/lib/image-hosts";
 import { resolveContentItem } from "@/lib/providers/social/content-builders";
+import { parseHttpUrl } from "@/lib/admin/http-url";
 import {
-  createNewsDraftFromUrlAction,
   createManualDraftAction,
   createMatchSportDraftAction,
   updateDraftAction,
@@ -27,7 +27,7 @@ import {
   type TeamsByCompetitionGroup,
   getMatchDetailAction,
   getResolvedSubjectBaseAction,
-  extractOpenGraphAction,
+  extractLinkAction,
   type MatchGroups,
 } from "@/lib/actions/admin-content.actions";
 import type { ContentDraft, ContentDestination, ContentDraftKind, SubjectType } from "@/lib/admin/content-drafts";
@@ -36,7 +36,6 @@ import type { Match, MatchEvent, Team } from "@/lib/types";
 
 type ManualKind = "NEWS" | "IMAGE" | "VIDEO";
 type MatchSportKind = "MATCH_RESULT" | "GOAL" | "MATCH_SUMMARY";
-type NewsCreateMode = "url" | "manual";
 
 /** يُطبَّع دائماً إلى إحدى 3 حالات: SITE فقط / SNAPCHAT فقط / كلاهما — يطابق
  * قيد قاعدة البيانات (destinations <@ ['SITE','SNAPCHAT']) بلا أي قيمة أخرى. */
@@ -159,21 +158,17 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  // أخبار: استيراد من رابط أو يدوي (NEWS فقط)
-  const [newsMode, setNewsMode] = useState<NewsCreateMode>("url");
-  const [importUrl, setImportUrl] = useState("");
-
-  // نموذج يدوي مشترك (عام / أندية / بطولات / مباريات→NEWS-IMAGE-VIDEO)
+  // نموذج يدوي مشترك (عام / أندية / بطولات / مباريات→NEWS-IMAGE-VIDEO / أخبار)
   const [manualKind, setManualKind] = useState<ManualKind>("NEWS");
   const [manualTitle, setManualTitle] = useState("");
   const [manualSummary, setManualSummary] = useState("");
   const [manualImage, setManualImage] = useState("");
   const [manualVideoUrl, setManualVideoUrl] = useState("");
-  // استيراد عام اختياري (Open Graph) — يملأ الحقول أعلاه فقط، لا يُنشئ شيئاً بنفسه
-  const [ogImportUrl, setOgImportUrl] = useState("");
-  const [ogImportLoading, setOgImportLoading] = useState(false);
-  const [ogImportMessage, setOgImportMessage] = useState<string | null>(null);
-  const [manualSourceRef, setManualSourceRef] = useState<string | null>(null);
+  // رابط المصدر: أي http/https (اختياري تماماً) يُحفَظ كما أدخله المسؤول، مستقلاً
+  // عن "استخراج" الذي يحاول فقط قراءة البيانات المتاحة فيه لتعبئة الحقول.
+  const [manualSourceRef, setManualSourceRef] = useState("");
+  const [extractLoading, setExtractLoading] = useState(false);
+  const [extractMessage, setExtractMessage] = useState<string | null>(null);
 
   // مباريات
   const [matchGroups, setMatchGroups] = useState<MatchGroups | null>(null);
@@ -195,6 +190,9 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   const [selectedLeagueId, setSelectedLeagueId] = useState<string | "OTHER" | null>(null);
   const [teamFilter, setTeamFilter] = useState("");
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+  // النادي المختار جاء من قائمة جزئية (أو "أخرى") — لا يُربَط به فيديو؛ الفيديو
+  // إمّا عام أو مرتبط بنادٍ من قائمة كاملة حقيقية فقط.
+  const [selectedTeamPartial, setSelectedTeamPartial] = useState(false);
 
   // بطولات
   const [selectedCompetitionId, setSelectedCompetitionId] = useState<string | null>(null);
@@ -215,16 +213,13 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
 
   function resetSubjectFlow() {
     setSubject(null);
-    setNewsMode("url");
-    setImportUrl("");
     setManualKind("NEWS");
     setManualTitle("");
     setManualSummary("");
     setManualImage("");
     setManualVideoUrl("");
-    setOgImportUrl("");
-    setOgImportMessage(null);
-    setManualSourceRef(null);
+    setManualSourceRef("");
+    setExtractMessage(null);
     setMatchGroups(null);
     setMatchQuery("");
     setMatchSearchResults(null);
@@ -237,6 +232,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     setSelectedLeagueId(null);
     setTeamFilter("");
     setSelectedTeam(null);
+    setSelectedTeamPartial(false);
     setSelectedCompetitionId(null);
     setCreateError(null);
   }
@@ -298,14 +294,16 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
 
   function errorMessage(code: string): string {
     switch (code) {
-      case "not_found":
-        return t.admin.importNotFound;
       case "empty":
       case "image_required":
       case "video_required":
         return t.admin.emptyTitleError;
       case "no_destination":
         return t.admin.noDestinationError;
+      case "invalid_url":
+        return t.admin.invalidLinkError;
+      case "club_roster_unavailable":
+        return t.admin.clubRosterUnavailable;
       default:
         return t.admin.genericError;
     }
@@ -321,27 +319,19 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     resetSubjectFlow();
   }
 
-  async function handleImportSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setCreateError(null);
-    if (createDestinations.length === 0) return setCreateError(t.admin.noDestinationError);
-    setCreateLoading(true);
-    try {
-      applyCreateResult(await createNewsDraftFromUrlAction({ newsUrl: importUrl, destinations: createDestinations }));
-    } finally {
-      setCreateLoading(false);
-    }
-  }
-
-  async function handleExtractOpenGraph() {
-    const url = ogImportUrl.trim();
+  /** يحاول قراءة البيانات المتاحة في الرابط فقط. فشل الاستخراج لا يمسّ الرابط
+   * نفسه (يبقى محفوظاً كمصدر) ولا يمنع إنشاء المحتوى — يُكمل المسؤول يدوياً. */
+  async function handleExtractLink() {
+    const url = manualSourceRef.trim();
     if (!url) return;
-    setOgImportLoading(true);
-    setOgImportMessage(null);
+    if (!parseHttpUrl(url)) return setExtractMessage(t.admin.ogInvalidUrl);
+
+    setExtractLoading(true);
+    setExtractMessage(null);
     try {
-      const result = await extractOpenGraphAction(url);
+      const result = await extractLinkAction(url);
       if ("error" in result) {
-        setOgImportMessage(
+        setExtractMessage(
           result.error === "blocked_host"
             ? t.admin.ogBlockedHost
             : result.error === "invalid_url"
@@ -354,10 +344,9 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       if (data.title) setManualTitle(data.title);
       if (data.description) setManualSummary(data.description);
       if (data.imageUrl) setManualImage(data.imageUrl);
-      setManualSourceRef(data.canonicalUrl);
-      setOgImportMessage(data.warnings.length > 0 ? t.admin.ogPartialData : t.admin.ogSuccess);
+      setExtractMessage(data.warnings.length > 0 ? t.admin.ogPartialData : t.admin.ogSuccess);
     } finally {
-      setOgImportLoading(false);
+      setExtractLoading(false);
     }
   }
 
@@ -375,7 +364,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
           summary: manualSummary,
           imageUrl: manualImage,
           videoUrl: manualVideoUrl,
-          sourceRef: manualSourceRef,
+          sourceRef: manualSourceRef.trim() || null,
           destinations: createDestinations,
         })
       );
@@ -452,7 +441,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
         destinations: editDestinations,
         attachments: editAttachments,
       });
-      if ("error" in result) return setEditError(t.admin.genericError);
+      if ("error" in result) return setEditError(errorMessage(result.error));
       upsertDraft(result.draft);
     } finally {
       setEditLoading(null);
@@ -489,6 +478,9 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   function addAttachment() {
     const url = newAttachmentUrl.trim();
     if (!url) return;
+    // أي http/https مقبول لكل الأنواع (LINK/IMAGE/VIDEO) بلا whitelist؛ غير ذلك لا.
+    if (!parseHttpUrl(url)) return setEditError(t.admin.invalidLinkError);
+    setEditError(null);
     setEditAttachments((prev) => [...prev, { type: newAttachmentType, url, caption: newAttachmentCaption.trim() || undefined }]);
     setNewAttachmentUrl("");
     setNewAttachmentCaption("");
@@ -522,23 +514,27 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
         className="space-y-4 max-w-lg"
       >
         <div className="rounded-[var(--radius-sm)] border border-dashed border-border p-3">
-          <p className="text-xs font-bold text-muted mb-1.5">{t.admin.ogImportLabel}</p>
+          <label htmlFor="source-link" className="block text-xs font-bold text-muted mb-1.5">
+            {t.admin.sourceLinkLabel}
+          </label>
           <div className="flex gap-2">
             <Input
-              type="url"
+              id="source-link"
+              type="text"
+              inputMode="url"
               dir="ltr"
-              value={ogImportUrl}
+              value={manualSourceRef}
               onChange={(e) => {
-                setOgImportUrl(e.target.value);
-                setOgImportMessage(null);
+                setManualSourceRef(e.target.value);
+                setExtractMessage(null);
               }}
               placeholder="https://..."
             />
-            <Button type="button" size="sm" variant="secondary" onClick={handleExtractOpenGraph} disabled={ogImportLoading || !ogImportUrl.trim()}>
-              {ogImportLoading ? t.admin.ogExtracting : t.admin.ogExtract}
+            <Button type="button" size="sm" variant="secondary" onClick={handleExtractLink} disabled={extractLoading || !manualSourceRef.trim()}>
+              {extractLoading ? t.admin.ogExtracting : t.admin.ogExtract}
             </Button>
           </div>
-          {ogImportMessage && <p className="text-xs text-muted mt-1.5">{ogImportMessage}</p>}
+          {extractMessage && <p className="text-xs text-muted mt-1.5">{extractMessage}</p>}
         </div>
 
         {kindOptions.length > 1 && (
@@ -831,11 +827,19 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                   <div className="space-y-4">
                     <div className="rounded-[var(--radius-sm)] border border-border p-3 flex items-center justify-between">
                       <span className="text-sm font-bold">{selectedTeam.name}</span>
-                      <button type="button" onClick={() => setSelectedTeam(null)} className="text-xs font-bold text-primary">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTeam(null);
+                          setSelectedTeamPartial(false);
+                        }}
+                        className="text-xs font-bold text-primary"
+                      >
                         {t.admin.changeTeam}
                       </button>
                     </div>
-                    {renderManualForm(["NEWS", "IMAGE", "VIDEO"], () => submitManual("TEAM", selectedTeam.id))}
+                    {selectedTeamPartial && <p className="text-xs text-warning">{t.admin.videoNeedsCompleteRosterNote}</p>}
+                    {renderManualForm(selectedTeamPartial ? ["NEWS", "IMAGE"] : ["NEWS", "IMAGE", "VIDEO"], () => submitManual("TEAM", selectedTeam.id))}
                   </div>
                 ) : selectedLeagueId ? (
                   <div className="space-y-4">
@@ -865,7 +869,14 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                             <li key={team.id}>
                               <button
                                 type="button"
-                                onClick={() => setSelectedTeam(team)}
+                                onClick={() => {
+                                  const partial =
+                                    selectedLeagueId === "OTHER" || Boolean(teamGroups.groups.find((g) => g.competitionId === selectedLeagueId)?.isPartial);
+                                  setSelectedTeamPartial(partial);
+                                  // فيديو مرتبط بنادٍ من قائمة جزئية غير مسموح — يعود النوع لخبر.
+                                  if (partial && manualKind === "VIDEO") setManualKind("NEWS");
+                                  setSelectedTeam(team);
+                                }}
                                 className="w-full text-start rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors text-sm font-bold"
                               >
                                 {team.name}
@@ -888,7 +899,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                             className="w-full flex items-center justify-between rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors text-sm font-bold"
                           >
                             <span>{localizeCompetitionShortName(g.competitionId, locale) ?? g.competitionId}</span>
-                            <Badge tone="neutral">{g.teams.length}</Badge>
+                            {/* عدد الأندية يُعرَض فقط لقائمة كاملة — الجزئية لا رقم لها كي لا يُقرأ كحجم الدوري */}
+                            {g.isPartial ? <Badge tone="warning">{t.admin.partialBadge}</Badge> : <Badge tone="neutral">{g.teams.length}</Badge>}
                           </button>
                         </li>
                       ))}
@@ -900,7 +912,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                             className="w-full flex items-center justify-between rounded-[var(--radius-sm)] border border-border p-3 hover:border-primary/30 transition-colors text-sm font-bold"
                           >
                             <span>{t.admin.otherClubsLabel}</span>
-                            <Badge tone="neutral">{teamGroups.other.length}</Badge>
+                            <Badge tone="warning">{t.admin.partialBadge}</Badge>
                           </button>
                         </li>
                       )}
@@ -940,49 +952,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
                 ))}
 
               {/* ===== أخبار ===== */}
-              {subject === "NEWS" && (
-                <div className="space-y-4">
-                  <div className="flex gap-2">
-                    {(
-                      [
-                        ["url", t.admin.importFromUrlTab],
-                        ["manual", t.admin.manualTab],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => {
-                          setNewsMode(key);
-                          if (key === "manual") setManualKind("NEWS");
-                        }}
-                        className={pillClass(newsMode === key)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {newsMode === "url" ? (
-                    <form onSubmit={handleImportSubmit} className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-bold mb-1.5">{t.admin.newsUrlLabel}</label>
-                        <Input type="url" dir="ltr" value={importUrl} onChange={(e) => setImportUrl(e.target.value)} placeholder="https://..." />
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold mb-1.5">{t.admin.destinationLabel}</p>
-                        <DestinationPicker value={createDestinations} onChange={setCreateDestinations} />
-                      </div>
-                      {createError && <p className="text-sm text-error font-bold">{createError}</p>}
-                      <Button type="submit" disabled={createLoading}>
-                        {createLoading ? t.admin.importSubmitting : t.admin.importSubmit}
-                      </Button>
-                    </form>
-                  ) : (
-                    renderManualForm(["NEWS"], () => submitManual("NEWS", null))
-                  )}
-                </div>
-              )}
+              {subject === "NEWS" && renderManualForm(["NEWS"], () => submitManual("NEWS", null))}
 
               {/* ===== عام ===== */}
               {subject === "GENERAL" && renderManualForm(["NEWS", "IMAGE", "VIDEO"], () => submitManual("GENERAL", null))}

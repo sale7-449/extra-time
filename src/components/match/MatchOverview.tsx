@@ -7,6 +7,7 @@ import { MatchStats } from "@/components/match/MatchStats";
 import { MatchSummary } from "@/components/match/MatchSummary";
 import { GoalVideoButton } from "@/components/media/GoalVideoButton";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
+import { formatMatchDate } from "@/lib/utils";
 
 export function MatchOverview({ match, matchMedia }: { match: Match; matchMedia: MatchedMedia[] }) {
   const { t, locale } = useLocale();
@@ -22,10 +23,7 @@ export function MatchOverview({ match, matchMedia }: { match: Match; matchMedia:
         {match.referee && <InfoItem label={t.match.referee} value={match.referee} />}
         <InfoItem
           label={t.match.date}
-          value={new Date(match.kickoff).toLocaleDateString(locale === "ar" ? "ar-SA" : "en-US", {
-            day: "numeric",
-            month: "long",
-          })}
+          value={formatMatchDate(match.kickoff, locale)}
         />
       </div>
 

@@ -8,7 +8,7 @@ import { cx } from "@/lib/utils";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { Modal } from "@/components/ui/Modal";
 
-export function MobileNav() {
+export function MobileNav({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
   const { t } = useLocale();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -27,6 +27,7 @@ export function MobileNav() {
     { href: "/videos", label: t.nav.videos },
     { href: "/transfers", label: t.nav.transfers },
     { href: "/stats", label: t.nav.stats },
+    ...(isAdmin ? [{ href: "/admin", label: t.nav.admin }] : []),
   ];
 
   const isMoreActive = moreItems.some((item) => pathname.startsWith(item.href));

@@ -135,6 +135,15 @@ export function MoreIcon(props: IconProps) {
   );
 }
 
+export function ShieldIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...base} {...props}>
+      <path d="M12 3.2 5 6v5.5c0 4.3 2.9 7.8 7 9.3 4.1-1.5 7-5 7-9.3V6l-7-2.8Z" />
+      <path d="m9 12 2.2 2.2L15.2 10" />
+    </svg>
+  );
+}
+
 export function CloseIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" {...base} {...props}>

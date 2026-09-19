@@ -7,6 +7,7 @@ import { Footer } from "@/components/layout/Footer";
 import { LocaleProvider } from "@/lib/i18n/LocaleProvider";
 import { FollowProvider } from "@/lib/follow/FollowProvider";
 import { getServerLocale, getMessages } from "@/lib/i18n/getServerLocale";
+import { getAdminSession } from "@/lib/admin/session";
 
 const tajawal = Tajawal({
   variable: "--font-tajawal",
@@ -37,16 +38,21 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getServerLocale();
   const dir = locale === "ar" ? "rtl" : "ltr";
+  // جلسة Admin موقَّعة صالحة فقط تُظهر رابط لوحة الإدارة — قيمة boolean فقط
+  // تصل للعميل (لا اسم مستخدم ولا رمز). التحقق الفعلي من الصلاحية يبقى دائماً
+  // على الخادم (middleware + (protected)/layout + كل Server Action).
+  const isAdmin = (await getAdminSession()) !== null;
+  const year = new Date().getFullYear();
 
   return (
     <html lang={locale} dir={dir} className={`${tajawal.variable} h-full`}>
       <body className="min-h-full flex flex-col bg-bg text-ink antialiased">
         <LocaleProvider locale={locale}>
           <FollowProvider>
-            <Header />
+            <Header isAdmin={isAdmin} />
             <main className="flex-1 pb-20 md:pb-0">{children}</main>
-            <Footer />
-            <MobileNav />
+            <Footer year={year} />
+            <MobileNav isAdmin={isAdmin} />
           </FollowProvider>
         </LocaleProvider>
       </body>

@@ -1,7 +1,6 @@
 import { getServerLocale, getMessages } from "@/lib/i18n/getServerLocale";
 import { listContentDraftsAction } from "@/lib/actions/admin-content.actions";
 import { ContentStudioClient } from "@/components/admin/ContentStudioClient";
-import { VideoQuickShare } from "@/components/admin/VideoQuickShare";
 
 export async function generateMetadata() {
   const t = getMessages(await getServerLocale());
@@ -27,10 +26,6 @@ export default async function AdminContentPage() {
       </div>
 
       <ContentStudioClient initialDrafts={drafts} />
-
-      <div className="border-t border-border pt-10">
-        <VideoQuickShare />
-      </div>
     </div>
   );
 }

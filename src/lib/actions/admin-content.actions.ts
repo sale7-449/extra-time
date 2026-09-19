@@ -1,24 +1,21 @@
 "use server";
 
 import { getNewsPool } from "@/lib/services/news.service";
-import { getMediaPool } from "@/lib/services/media.service";
 import { getMatch, getUpcomingMatches, getRecentResults } from "@/lib/services/matches.service";
 import {
-  toNewsContentItem,
-  toVideoContentItem,
   toManualVideoContentItem,
   toMatchResultContentItem,
   toGoalContentItem,
   toMatchSummaryBaseContent,
   toImageContentItem,
 } from "@/lib/providers/social/content-builders";
-import { encodeNewsId } from "@/lib/news-id";
 import { getServerLocale } from "@/lib/i18n/getServerLocale";
 import { COMPETITION_CATALOG } from "@/lib/providers/football/competition-catalog";
 import { canonicalCompetitionId, tagId } from "@/lib/providers/football/ids";
 import { getTeamsByCompetition } from "@/lib/providers/football";
 import { uploadContentMedia } from "@/lib/admin/content-media-storage";
-import { extractOpenGraph, type OpenGraphOutcome } from "@/lib/admin/open-graph-extractor";
+import { extractOpenGraph, type OpenGraphResult } from "@/lib/admin/open-graph-extractor";
+import { parseHttpUrl } from "@/lib/admin/http-url";
 import type { ContentItem, Attachment } from "@/lib/providers/social/types";
 import type { Match, Team } from "@/lib/types";
 import { getAdminSession } from "@/lib/admin/session";
@@ -51,82 +48,6 @@ function normalizeUrl(url: string): string {
   }
 }
 
-/** معرّف فيديو يوتيوب من أي صيغة رابط شائعة — لا تخمين، null صريح إن لم يكن
- * رابط يوتيوب صالحاً أصلاً. */
-function extractYouTubeId(url: string): string | null {
-  try {
-    const u = new URL(url.trim());
-    const host = u.hostname.replace(/^www\.|^m\./, "");
-    if (host === "youtu.be") return u.pathname.slice(1).split("/")[0] || null;
-    if (host === "youtube.com") {
-      const v = u.searchParams.get("v");
-      if (v) return v;
-      const m = u.pathname.match(/^\/(shorts|embed)\/([^/?]+)/);
-      if (m) return m[2];
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export interface AdminContentResult {
-  news: { item: ContentItem; pagePath: string } | null;
-  video: { item: ContentItem } | null;
-  newsNotFound: boolean;
-  videoNotFound: boolean;
-}
-
-const EMPTY_RESULT: AdminContentResult = { news: null, video: null, newsNotFound: false, videoNotFound: false };
-
-/**
- * يبحث عن الرابط المُدخَل ضمن المجمّعات الحقيقية المُهيَّأة أصلاً (موجزات RSS
- * الإخبارية / موجزات يوتيوب الرسمية) — لا طلب شبكة جديد لرابط عشوائي، لا
- * scraping. رابط غير موجود ضمن هذه المصادر المسموح بها = "غير متاح" صريح،
- * لا اختلاق محتوى ولا جلب من مصدر غير مُعتمَد.
- */
-export async function fetchAdminContent(input: {
-  newsUrl?: string;
-  videoUrl?: string;
-  captionOverride?: string;
-}): Promise<AdminContentResult> {
-  const newsUrl = input.newsUrl?.trim();
-  const videoUrl = input.videoUrl?.trim();
-  if (!newsUrl && !videoUrl) return EMPTY_RESULT;
-
-  const locale = await getServerLocale();
-  const result: AdminContentResult = { news: null, video: null, newsNotFound: false, videoNotFound: false };
-  const caption = input.captionOverride?.trim();
-
-  if (newsUrl) {
-    const target = normalizeUrl(newsUrl);
-    const pool = await getNewsPool(locale);
-    const article = pool.find((a) => normalizeUrl(a.sourceUrl) === target);
-    if (article) {
-      const item = toNewsContentItem(article);
-      if (caption) item.title = caption;
-      result.news = { item, pagePath: `/news/${encodeNewsId(article.id)}` };
-    } else {
-      result.newsNotFound = true;
-    }
-  }
-
-  if (videoUrl) {
-    const videoId = extractYouTubeId(videoUrl);
-    const pool = await getMediaPool(locale);
-    const media = videoId ? pool.find((m) => m.id === `yt-${videoId}`) : undefined;
-    if (media) {
-      const item = toVideoContentItem(media);
-      if (caption) item.title = caption;
-      result.video = { item };
-    } else {
-      result.videoNotFound = true;
-    }
-  }
-
-  return result;
-}
-
 /**
  * Content Studio — تصميم Subject/Entity الرسمي: كل محتوى مرتبط بموضوع
  * (مباراة/نادٍ/بطولة/خبر عام/عام) عبر subjectType+subjectId، لا عبر
@@ -148,36 +69,74 @@ export async function listContentDraftsAction(): Promise<ContentDraft[]> {
   return listContentDrafts();
 }
 
-/** استيراد خبر من رابط — بنفس آلية fetchAdminContent أعلاه بالضبط (مطابقة
- * ضمن مجمّع RSS الحقيقي المُهيَّأ أصلاً، لا جلب/scraping لرابط عام). يبقى
- * NEWS فقط، subjectType=NEWS دائماً — استيراد الرابط العام خارج النطاق حالياً. */
-export async function createNewsDraftFromUrlAction(input: {
-  newsUrl: string;
-  destinations: ContentDestination[];
-}): Promise<DraftActionResult> {
-  const createdBy = await requireAdminUsername();
-  const newsUrl = input.newsUrl.trim();
-  if (!newsUrl) return { error: "empty" };
-  if (input.destinations.length === 0) return { error: "no_destination" };
+/**
+ * استخراج اختياري من أي رابط http/https — لا whitelist لمصادر. مساعد تعبئة
+ * فقط: لا يُنشئ Draft ولا يُلزم بأي حقل، وفشله لا يمنع حفظ الرابط كمصدر.
+ * الترتيب: (1) رابط ضمن موجزات RSS الحقيقية المُهيَّأة أصلاً → بياناته كما
+ * وردت من مصدره بلا أي طلب شبكة جديد؛ (2) أي رابط آخر → قراءة الوسوم العامة
+ * المتاحة في صفحته فقط عبر جلب محمي من SSRF (open-graph-extractor). أي حقل
+ * غائب يعود null مع تحذير مطابق — لا اختلاق عنوان أو وصف.
+ */
+export type LinkExtractionOutcome =
+  | { origin: "rss" | "page"; data: OpenGraphResult }
+  | { error: "invalid_url" | "blocked_host" | "fetch_failed" };
 
-  const locale = await getServerLocale();
-  const target = normalizeUrl(newsUrl);
-  const pool = await getNewsPool(locale);
-  const article = pool.find((a) => normalizeUrl(a.sourceUrl) === target);
-  if (!article) return { error: "not_found" };
+export async function extractLinkAction(url: string): Promise<LinkExtractionOutcome> {
+  await requireAdminUsername();
+  const accepted = parseHttpUrl(url);
+  if (!accepted) return { error: "invalid_url" };
 
-  const baseContent = toNewsContentItem(article);
-  const draft = await createContentDraft({
-    kind: "NEWS",
-    sourceType: "URL",
-    sourceRef: newsUrl,
-    subjectType: "NEWS",
-    baseContent,
-    destinations: input.destinations,
-    createdBy,
-  });
-  if (!draft) return { error: "create_failed" };
-  return { draft };
+  try {
+    const locale = await getServerLocale();
+    const target = normalizeUrl(accepted);
+    const article = (await getNewsPool(locale)).find((a) => normalizeUrl(a.sourceUrl) === target);
+    if (article) {
+      const description = article.summary?.trim() || null;
+      return {
+        origin: "rss",
+        data: {
+          title: article.title,
+          description,
+          imageUrl: article.imageUrl,
+          canonicalUrl: article.sourceUrl,
+          warnings: [...(description ? [] : (["no_description"] as const)), ...(article.imageUrl ? [] : (["no_image"] as const))],
+        },
+      };
+    }
+  } catch (error) {
+    // فشل مجمّع الأخبار لا يمنع قراءة الصفحة نفسها مباشرةً أدناه.
+    console.error("[content-studio] RSS pool lookup failed during link extraction:", error);
+  }
+
+  const outcome = await extractOpenGraph(accepted);
+  return "error" in outcome ? outcome : { origin: "page", data: outcome.data };
+}
+
+/** يتحقّق أن كل رابط مرفق http/https صالح (أي مصدر مقبول) ويُنظّف الحقول —
+ * null = يوجد رابط غير صالح. الـServer Action يستقبل دائماً بيانات غير موثوقة
+ * من العميل، فلا نعتمد على فحص الواجهة وحده. */
+function sanitizeAttachments(list: Attachment[]): Attachment[] | null {
+  const clean: Attachment[] = [];
+  for (const item of list) {
+    if (item.type !== "IMAGE" && item.type !== "VIDEO" && item.type !== "LINK") return null;
+    const url = parseHttpUrl(item.url);
+    if (!url) return null;
+    const caption = typeof item.caption === "string" ? item.caption.trim().slice(0, 300) : "";
+    clean.push({ type: item.type, url, ...(caption ? { caption } : {}) });
+  }
+  return clean;
+}
+
+/** فيديو مرتبط بنادٍ لا يُقبَل إلا لنادٍ موجود فعلاً في قائمة كاملة حقيقية
+ * لأحد دوريات الكتالوج (لا قائمة جزئية مُستخلَصة من نافذة مباريات، ولا معرّف
+ * مُخترَع). الفيديو العام بلا ربط بنادٍ لا يمرّ من هنا أصلاً. */
+async function isTeamInCompleteRoster(teamId: string): Promise<boolean> {
+  for (const entry of COMPETITION_CATALOG) {
+    if (entry.afId === undefined) continue;
+    const full = await getTeamsByCompetition({ afId: entry.afId });
+    if (full?.some((team) => team.id === teamId)) return true;
+  }
+  return false;
 }
 
 /**
@@ -207,19 +166,36 @@ export async function createManualDraftAction(input: {
     return { error: "subject_required" };
   }
 
+  // كل رابط يقبل أي http/https بلا whitelist؛ غير ذلك (javascript:/data:/نص
+  // عشوائي) يُرفض لأن الرابط المحفوظ قد يُعرَض لاحقاً كـ<a href> على الموقع.
+  const imageInput = input.imageUrl.trim();
+  const imageUrl = imageInput ? parseHttpUrl(imageInput) : "";
+  if (imageUrl === null) return { error: "invalid_url" };
+
+  // المصدر اختياري تماماً؛ إن وُجد يُحفَظ كما أدخله المسؤول حرفياً.
+  const sourceInput = input.sourceRef?.trim() ?? "";
+  const sourceRef = sourceInput ? parseHttpUrl(sourceInput) : null;
+  if (sourceInput && !sourceRef) return { error: "invalid_url" };
+
   const locale = await getServerLocale();
   let baseContent: ContentItem | null;
 
   if (input.kind === "IMAGE") {
-    baseContent = toImageContentItem({ title, imageUrl: input.imageUrl, caption: input.summary.trim() || undefined });
+    baseContent = toImageContentItem({ title, imageUrl, caption: input.summary.trim() || undefined });
     if (!baseContent) return { error: "image_required" };
   } else if (input.kind === "VIDEO") {
-    baseContent = toManualVideoContentItem({
-      title,
-      videoUrl: input.videoUrl ?? "",
-      imageUrl: input.imageUrl,
-      caption: input.summary.trim() || undefined,
-    });
+    const videoInput = (input.videoUrl ?? "").trim();
+    if (!videoInput) return { error: "video_required" };
+    const videoUrl = parseHttpUrl(videoInput);
+    if (!videoUrl) return { error: "invalid_url" };
+
+    // فيديو مرتبط بنادٍ: من قائمة أندية كاملة حقيقية فقط. فيديو عام (GENERAL
+    // وغيره) لا يخضع لأي قيد مصدر.
+    if (input.subjectType === "TEAM" && !(await isTeamInCompleteRoster(input.subjectId ?? ""))) {
+      return { error: "club_roster_unavailable" };
+    }
+
+    baseContent = toManualVideoContentItem({ title, videoUrl, imageUrl, caption: input.summary.trim() || undefined });
     if (!baseContent) return { error: "video_required" };
   } else {
     baseContent = {
@@ -227,14 +203,13 @@ export async function createManualDraftAction(input: {
       kind: "NEWS",
       title,
       summary: input.summary.trim() || undefined,
-      imageUrl: input.imageUrl.trim() || null,
+      imageUrl: imageUrl || null,
       publishedAt: new Date().toISOString(),
       language: locale,
       data: { source: "Extra Time", category: "FOOTBALL" },
     };
   }
 
-  const sourceRef = input.sourceRef?.trim() || null;
   const draft = await createContentDraft({
     kind: input.kind,
     sourceType: sourceRef ? "URL" : "MANUAL",
@@ -486,12 +461,23 @@ export async function updateDraftAction(
   if (!title) return { error: "empty" };
   if (input.destinations.length === 0) return { error: "no_destination" };
 
+  const imageInput = input.imageUrl.trim();
+  const imageUrl = imageInput ? parseHttpUrl(imageInput) : "";
+  if (imageUrl === null) return { error: "invalid_url" };
+
+  let attachments: Attachment[] | undefined;
+  if (input.attachments !== undefined) {
+    const clean = sanitizeAttachments(input.attachments);
+    if (!clean) return { error: "invalid_url" };
+    attachments = clean;
+  }
+
   const overrides: Partial<ContentItem> = {
     title,
     summary: input.summary.trim() || undefined,
-    imageUrl: input.imageUrl.trim() || null,
+    imageUrl: imageUrl || null,
   };
-  const draft = await updateContentDraft(id, { overrides, destinations: input.destinations, attachments: input.attachments });
+  const draft = await updateContentDraft(id, { overrides, destinations: input.destinations, attachments });
   if (!draft) return { error: "update_failed" };
   return { draft };
 }
@@ -523,15 +509,4 @@ export async function uploadContentMediaAction(input: {
 }): Promise<{ url: string } | { error: string }> {
   await requireAdminUsername();
   return uploadContentMedia(input);
-}
-
-/**
- * استخراج عام من رابط خارجي عبر Open Graph — مساعد اختياري بحت لتعبئة نموذج
- * الإنشاء اليدوي (لا يُنشئ Draft بنفسه، ولا يُلزم بأي حقل): طلب HTML واحد
- * فقط، بلا تسجيل دخول أو تجاوز حماية، بلا زحف لصفحات إضافية. أي حقل غائب في
- * الصفحة يعود null صراحة مع تحذير مطابق — لا اختلاق، والمستخدم يكمل يدوياً.
- */
-export async function extractOpenGraphAction(url: string): Promise<OpenGraphOutcome> {
-  await requireAdminUsername();
-  return extractOpenGraph(url);
 }

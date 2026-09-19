@@ -1,15 +1,19 @@
 import { decodeEntities } from "@/lib/providers/news/rss-parser";
+import { parseHttpUrl } from "@/lib/admin/http-url";
+import { BlockedHostError, safeFetchHtml } from "@/lib/admin/safe-fetch";
 
 /**
- * استخراج بيانات عامة من رابط خارجي عبر وسوم Open Graph فقط — لا تسجيل
- * دخول، لا تجاوز حماية/paywall، لا "scraping عدواني" (طلب HTML واحد فقط،
- * بلا زحف لصفحات إضافية). كل حقل هنا إمّا مُستخرَج فعلياً من الصفحة نفسها
- * أو null صريح — لا اختلاق قيمة غائبة بأي شكل.
+ * قراءة البيانات العامة المتاحة فعلاً في صفحة رابط خارجي — لا تسجيل دخول، لا
+ * تجاوز حماية/paywall، لا "scraping عدواني" (طلب HTML واحد فقط بحدّ حجم
+ * ووقت، بلا زحف لصفحات إضافية). كل حقل هنا إمّا مُستخرَج فعلياً من الصفحة
+ * نفسها أو null صريح — لا اختلاق قيمة غائبة بأي شكل. الأولوية: وسوم Open
+ * Graph، ثم Twitter Cards، ثم schema.org JSON-LD، ثم <title> ووصف meta
+ * العاديَّين — كلها بيانات ظاهرة في الصفحة نفسها.
+ *
+ * قبول الرابط للتخزين مستقل تماماً عن هذا الجلب (انظر http-url.ts): فشل
+ * الجلب لا يمنع حفظ الرابط، ويُكمل المسؤول الحقول يدوياً. حماية SSRF كاملة
+ * داخل safe-fetch.ts.
  */
-
-const FETCH_TIMEOUT_MS = 8000;
-const MAX_BYTES = 512 * 1024; // نصف ميغابايت يكفي دائماً لوسوم <head> — لا حاجة لتنزيل الصفحة كاملة.
-const USER_AGENT = "Mozilla/5.0 (compatible; ExtraTimeBot/1.0)";
 
 export interface OpenGraphResult {
   title: string | null;
@@ -22,80 +26,29 @@ export interface OpenGraphResult {
 
 export type OpenGraphOutcome = { data: OpenGraphResult } | { error: "invalid_url" | "blocked_host" | "fetch_failed" };
 
-/**
- * حماية أولى ضد SSRF: رفض أي مضيف يشير صراحة لشبكة محلية/خاصة قبل أي
- * محاولة اتصال. فحص نصي على اسم/عنوان المضيف كما كُتب في الرابط — **لا
- * يحلّ DNS للتحقق من العنوان الفعلي**، فرابط عام الشكل يُحيل عبر DNS Rebinding
- * لعنوان خاص لن يُكتَشف هنا (قيد معروف، موثَّق في التقرير المرفق لا مخفيّاً).
- */
-function isPrivateOrLocalHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  if (h === "localhost" || h === "0.0.0.0" || h === "::1" || h.endsWith(".local")) return true;
-
-  const ipv4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4) {
-    const a = Number(ipv4[1]);
-    const b = Number(ipv4[2]);
-    if (a === 127 || a === 0 || a === 10) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 169 && b === 254) return true; // بما فيه عنوان بيانات اعتماد السحابة الشهير 169.254.169.254
-  }
-  if (h.startsWith("fe80:") || h.startsWith("fc") || h.startsWith("fd")) return true;
-
-  return false;
-}
-
-async function fetchHtmlCapped(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: "follow",
-      headers: { "User-Agent": USER_AGENT },
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!/text\/html|application\/xhtml/i.test(contentType)) throw new Error("not html");
-
-    if (!response.body) return await response.text();
-
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let received = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.byteLength;
-      if (received >= MAX_BYTES) {
-        await reader.cancel().catch(() => {});
-        break;
+function extractMetaContent(html: string, keys: string[]): string | null {
+  for (const key of keys) {
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns = [
+      new RegExp(`<meta[^>]+(?:property|name)=["']${escaped}["'][^>]*content=["']([^"']*)["']`, "i"),
+      new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${escaped}["']`, "i"),
+    ];
+    for (const re of patterns) {
+      const match = html.match(re);
+      if (match) {
+        const value = decodeEntities(match[1]).trim();
+        if (value) return value;
       }
-    }
-    return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function extractMetaContent(html: string, property: string): string | null {
-  const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = [
-    new RegExp(`<meta[^>]+property=["']${escaped}["'][^>]*content=["']([^"']*)["']`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*property=["']${escaped}["']`, "i"),
-  ];
-  for (const re of patterns) {
-    const match = html.match(re);
-    if (match) {
-      const value = decodeEntities(match[1]).trim();
-      if (value) return value;
     }
   }
   return null;
+}
+
+function extractDocumentTitle(html: string): string | null {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (!match) return null;
+  const value = decodeEntities(match[1]).replace(/\s+/g, " ").trim();
+  return value || null;
 }
 
 /** بيانات بنيوية (schema.org JSON-LD) — تُستخدَم فقط لتعويض حقل لم توفّره
@@ -131,42 +84,40 @@ function extractJsonLdFallback(html: string): { title?: string; description?: st
 
 function resolveUrl(value: string, base: URL): string | null {
   try {
-    return new URL(value, base).toString();
+    const resolved = new URL(value, base);
+    // صورة/رابط بغير http(s) (data:, javascript:...) لا يُقبل كنتيجة استخراج.
+    return resolved.protocol === "http:" || resolved.protocol === "https:" ? resolved.toString() : null;
   } catch {
     return null;
   }
 }
 
 export async function extractOpenGraph(rawUrl: string): Promise<OpenGraphOutcome> {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl.trim());
-  } catch {
-    return { error: "invalid_url" };
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { error: "invalid_url" };
-  if (isPrivateOrLocalHost(parsed.hostname)) return { error: "blocked_host" };
+  const accepted = parseHttpUrl(rawUrl);
+  if (!accepted) return { error: "invalid_url" };
 
   let html: string;
+  let finalUrl: string;
   try {
-    html = await fetchHtmlCapped(parsed.toString());
-  } catch {
-    return { error: "fetch_failed" };
+    ({ html, finalUrl } = await safeFetchHtml(accepted));
+  } catch (error) {
+    return { error: error instanceof BlockedHostError ? "blocked_host" : "fetch_failed" };
   }
+  const base = new URL(finalUrl);
 
-  const ogTitle = extractMetaContent(html, "og:title");
-  const ogDescription = extractMetaContent(html, "og:description");
-  const ogImage = extractMetaContent(html, "og:image");
-  const ogUrl = extractMetaContent(html, "og:url");
+  const ogTitle = extractMetaContent(html, ["og:title", "twitter:title"]);
+  const ogDescription = extractMetaContent(html, ["og:description", "twitter:description"]);
+  const ogImage = extractMetaContent(html, ["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"]);
+  const ogUrl = extractMetaContent(html, ["og:url"]);
 
   const needsFallback = !ogTitle || !ogDescription || !ogImage;
   const jsonLd = needsFallback ? extractJsonLdFallback(html) : {};
 
-  const title = ogTitle ?? jsonLd.title ?? null;
-  const description = ogDescription ?? jsonLd.description ?? null;
+  const title = ogTitle ?? jsonLd.title ?? extractDocumentTitle(html);
+  const description = ogDescription ?? jsonLd.description ?? extractMetaContent(html, ["description"]);
   const rawImage = ogImage ?? jsonLd.image ?? null;
-  const imageUrl = rawImage ? resolveUrl(rawImage, parsed) : null;
-  const canonicalUrl = (ogUrl && resolveUrl(ogUrl, parsed)) || parsed.toString();
+  const imageUrl = rawImage ? resolveUrl(rawImage, base) : null;
+  const canonicalUrl = (ogUrl && resolveUrl(ogUrl, base)) || base.toString();
 
   const warnings: OpenGraphResult["warnings"] = [];
   if (!title) warnings.push("no_title");

@@ -16,8 +16,12 @@ export function LanguageSwitcher() {
 
   return (
     <div
-      className="flex items-center rounded-full border border-border bg-surface p-0.5 text-xs font-bold"
+      className={cx(
+        "flex items-center rounded-full border border-border bg-surface p-0.5 text-xs font-bold transition-opacity",
+        pending && "opacity-60"
+      )}
       dir="ltr"
+      aria-busy={pending}
       role="group"
       aria-label="Language / اللغة"
     >

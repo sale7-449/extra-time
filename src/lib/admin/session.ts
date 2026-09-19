@@ -1,75 +1,42 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
+import {
+  ADMIN_COOKIE_NAME,
+  ADMIN_COOKIE_OPTIONS,
+  ADMIN_SESSION_TTL_MS,
+  getAdminSecret,
+  signAdminToken,
+  verifyAdminToken,
+} from "@/lib/admin/admin-token";
 
 /**
  * جلسة مسؤول مستقلة تماماً عن Supabase Auth — cookie موقَّع بـHMAC، لا يعتمد
  * على `signInWithPassword` ولا على أي جدول/جلسة Supabase. صالحة لحساب
  * المسؤول الواحد الذي يُنشَأ عبر /admin/setup.
  *
+ * مستمرة: cookie بمسار "/" (الموقع كله) وعمر 30 يوماً يتجدد تلقائياً مع
+ * النشاط عبر middleware.ts — لا ترتبط بالبقاء داخل /admin، وتنتهي فقط بتسجيل
+ * خروج Admin (أو بعد 30 يوماً بلا أي زيارة).
+ *
  * يتطلّب ADMIN_SESSION_SECRET في بيئة السيرفر — بدونه، لا جلسة يمكن
  * إنشاؤها أو التحقق منها (فشل آمن، لا افتراض قيمة).
  */
 
-const COOKIE_NAME = "admin_session";
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 ساعة
-
-interface SessionPayload {
-  username: string;
-  expiresAt: number;
-}
-
-function getSecret(): string | null {
-  return process.env.ADMIN_SESSION_SECRET || null;
-}
-
-function sign(payload: string, secret: string): string {
-  return createHmac("sha256", secret).update(payload).digest("hex");
-}
-
 export async function createAdminSession(username: string): Promise<void> {
-  const secret = getSecret();
+  const secret = getAdminSecret();
   if (!secret) throw new Error("ADMIN_SESSION_SECRET is not configured");
 
-  const data: SessionPayload = { username, expiresAt: Date.now() + SESSION_TTL_MS };
-  const payload = Buffer.from(JSON.stringify(data)).toString("base64url");
-  const signature = sign(payload, secret);
-
+  const token = await signAdminToken({ username, expiresAt: Date.now() + ADMIN_SESSION_TTL_MS }, secret);
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, `${payload}.${signature}`, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    maxAge: SESSION_TTL_MS / 1000,
-    path: "/",
-  });
+  cookieStore.set(ADMIN_COOKIE_NAME, token, ADMIN_COOKIE_OPTIONS);
 }
 
 export async function getAdminSession(): Promise<{ username: string } | null> {
-  const secret = getSecret();
-  if (!secret) return null;
-
   const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value;
-  if (!token) return null;
-
-  const [payload, signature] = token.split(".");
-  if (!payload || !signature) return null;
-
-  const expectedSignature = sign(payload, secret);
-  const sigBuf = Buffer.from(signature, "hex");
-  const expectedBuf = Buffer.from(expectedSignature, "hex");
-  if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) return null;
-
-  try {
-    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as SessionPayload;
-    if (Date.now() > data.expiresAt) return null;
-    return { username: data.username };
-  } catch {
-    return null;
-  }
+  const data = await verifyAdminToken(cookieStore.get(ADMIN_COOKIE_NAME)?.value, getAdminSecret());
+  return data ? { username: data.username } : null;
 }
 
 export async function clearAdminSession(): Promise<void> {
   const cookieStore = await cookies();
-  cookieStore.delete(COOKIE_NAME);
+  cookieStore.delete({ name: ADMIN_COOKIE_NAME, path: ADMIN_COOKIE_OPTIONS.path });
 }

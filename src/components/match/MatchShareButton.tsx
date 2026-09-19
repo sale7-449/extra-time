@@ -1,21 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { Match } from "@/lib/types";
 import { ShareIcon } from "@/components/icons";
 import { useSnapchatShare } from "@/lib/providers/snapchat/useSnapchatShare";
 import { cx } from "@/lib/utils";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 
+const subscribe = () => () => {};
+
 export function MatchShareButton({ match }: { match: Match }) {
   const { status, message, share } = useSnapchatShare();
   const { t } = useLocale();
   // Web Share API غير مدعومة على أغلب متصفحات سطح المكتب — بدل زر يظهر
   // دائماً ثم يعرض "غير متاح" عند كل نقرة هناك (يبدو شكلياً)، لا يُعرض الزر
-  // إطلاقاً إن كان الدعم غائباً فعلياً. نفس نمط StoryModal.tsx (Phase 3.3):
-  // فحص جاهزية المتصفح عبر lazy useState initializer — يعمل فقط بعد mount
-  // على العميل، بلا خطر hydration mismatch (الزر لا يُعرض من الأساس قبل ذلك).
-  const [isAvailable] = useState(() => typeof navigator !== "undefined" && typeof navigator.share === "function");
+  // إطلاقاً إن كان الدعم غائباً فعلياً. lazy useState initializer كان يُشغَّل
+  // أيضاً أثناء hydration على العميل (على الجوال: navigator.share موجود →
+  // زر، بينما الخادم رسم null → hydration mismatch)؛ useSyncExternalStore
+  // يجعل snapshot الخادم والـhydration الأول false ثم يصحّحه بعد الـhydration.
+  const isAvailable = useSyncExternalStore(
+    subscribe,
+    () => typeof navigator.share === "function",
+    () => false
+  );
 
   if (!isAvailable) return null;
 

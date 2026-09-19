@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import type { FootballProvider } from "./types";
 import { MockFootballProvider } from "./mock-provider";
 import { ApiFootballProvider } from "./api-football-provider";
@@ -195,11 +196,44 @@ async function getMatchByIdWithEnrichment(id: string): Promise<Match | null> {
   return match;
 }
 
+/**
+ * كاش طبقة القوائم (Next Data Cache، مشترك بين كل نسخ Vercel) لنتيجة السلسلة
+ * كاملةً بعد نجاح مصدر واحد. سبب وجوده: كل مزوّد يبدأ طلباته على دفعات
+ * متباعدة (staggered) لتخفيف Rate Limit، فتكلفة الجلب الواحد ~2ث لكل مصدر
+ * يفشل قبل نجاح التالي (API-Football ثم TheSportsDB = ~3.5ث للصفحة الرئيسية)
+ * حتى عندما تكون استجابات fetch نفسها مخزَّنة — الفارق الزمني المتعمَّد
+ * يُدفَع في كل زيارة. الكاش هنا يتجاوز السلسلة كلها في الزيارات المتتالية
+ * (stale-while-revalidate: يُقدَّم آخر نتيجة صحيحة فوراً ويتجدد في الخلفية).
+ *
+ * لا يُخزَّن أي فشل: RealDataUnavailableError يُرمى ولا يدخل الكاش، فتُجرَّب
+ * المصادر من جديد في الطلب التالي. المدد قصيرة عمداً لمسارات "مباشر/اليوم"
+ * (حالة المباراة تتغير)، أطول لما يتغير ببطء. أي منطق يعتمد على الوقت الحالي
+ * أو اللغة (reconcileStaleLiveStatus، الترجمة) يُطبَّق بعد الكاش في
+ * matches.service، لا داخله — الكاش يحمل بيانات المزوّد الخام فقط.
+ */
+const CACHE_SECONDS = { live: 30, today: 30, tomorrow: 300, week: 600, results: 300, competitions: 1800 } as const;
+
+const chainLive = withChain("getLiveMatches");
+const chainRange = withChain("getMatchesByDateRange");
+const chainResults = withChain("getRecentResults");
+const chainCompetitions = withChain("getCompetitions");
+
+const cachedLive = unstable_cache(() => chainLive(), ["football", "live"], { revalidate: CACHE_SECONDS.live });
+const cachedRange = {
+  today: unstable_cache(() => chainRange("today"), ["football", "range", "today"], { revalidate: CACHE_SECONDS.today }),
+  tomorrow: unstable_cache(() => chainRange("tomorrow"), ["football", "range", "tomorrow"], { revalidate: CACHE_SECONDS.tomorrow }),
+  week: unstable_cache(() => chainRange("week"), ["football", "range", "week"], { revalidate: CACHE_SECONDS.week }),
+};
+const cachedResults = unstable_cache(() => chainResults(), ["football", "results"], { revalidate: CACHE_SECONDS.results });
+const cachedCompetitions = unstable_cache(() => chainCompetitions(), ["football", "competitions"], {
+  revalidate: CACHE_SECONDS.competitions,
+});
+
 export const footballProvider: FootballProvider = {
-  getLiveMatches: withChain("getLiveMatches"),
-  getMatchesByDateRange: withChain("getMatchesByDateRange"),
-  getRecentResults: withChain("getRecentResults"),
-  getCompetitions: withChain("getCompetitions"),
+  getLiveMatches: () => cachedLive(),
+  getMatchesByDateRange: (range) => cachedRange[range](),
+  getRecentResults: () => cachedResults(),
+  getCompetitions: () => cachedCompetitions(),
   getMatchById: getMatchByIdWithEnrichment,
   getCompetitionById: withIdRouting("getCompetitionById"),
   getStandings: withIdRouting("getStandings"),

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import type { NewsArticle } from "@/lib/types";
-import { formatRelativeTime } from "@/lib/utils";
+import { RelativeTime } from "@/components/shared/RelativeTime";
 import { encodeNewsId } from "@/lib/news-id";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { isAllowedImageHost } from "@/lib/image-hosts";
@@ -85,8 +85,8 @@ export function NewsCard({ article, size = "md" }: { article: NewsArticle; size?
             {article.title}
           </h3>
           <p dir={textDir} className="mt-2 text-sm text-muted line-clamp-2">{article.summary}</p>
-          <p suppressHydrationWarning className="mt-3 text-xs text-muted-dim">
-            {article.source} · {formatRelativeTime(article.publishedAt, locale)}
+          <p className="mt-3 text-xs text-muted-dim">
+            {article.source} · <RelativeTime iso={article.publishedAt} locale={locale} />
             {languageNote && <> · {languageNote}</>}
           </p>
         </div>
@@ -116,8 +116,8 @@ export function NewsCard({ article, size = "md" }: { article: NewsArticle; size?
         <h4 dir={textDir} className="text-sm font-bold leading-snug line-clamp-2 group-hover:text-primary transition-colors">
           {article.title}
         </h4>
-        <p suppressHydrationWarning className="text-xs text-muted-dim">
-          {article.source} · {formatRelativeTime(article.publishedAt, locale)}
+        <p className="text-xs text-muted-dim">
+          {article.source} · <RelativeTime iso={article.publishedAt} locale={locale} />
           {languageNote && <> · {languageNote}</>}
         </p>
       </div>

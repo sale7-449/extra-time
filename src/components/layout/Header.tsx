@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { SearchIcon, BellIcon, UserIcon } from "@/components/icons";
+import { SearchIcon, BellIcon, UserIcon, ShieldIcon } from "@/components/icons";
 import { Logo } from "@/components/shared/Logo";
 import { DesktopNav } from "@/components/layout/DesktopNav";
 import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
@@ -10,7 +10,7 @@ import { useLocale } from "@/lib/i18n/LocaleProvider";
 const iconButton =
   "w-10 h-10 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-surface transition-colors [&_svg]:w-5 [&_svg]:h-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary";
 
-export function Header() {
+export function Header({ isAdmin = false }: { isAdmin?: boolean }) {
   const { t } = useLocale();
 
   return (
@@ -27,6 +27,16 @@ export function Header() {
 
         <div className="flex items-center gap-1.5">
           <LanguageSwitcher />
+          {isAdmin && (
+            <Link
+              href="/admin"
+              aria-label={t.nav.admin}
+              title={t.nav.admin}
+              className="w-10 h-10 flex items-center justify-center rounded-full bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors [&_svg]:w-5 [&_svg]:h-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              <ShieldIcon />
+            </Link>
+          )}
           <Link href="/search" aria-label={t.nav.search} className={iconButton}>
             <SearchIcon />
           </Link>
