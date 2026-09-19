@@ -23,6 +23,7 @@ export const messages = {
       notifications: "الإشعارات",
       following: "متابَعاتي",
       admin: "لوحة الإدارة",
+      adminShort: "المسؤول",
     },
     search: {
       pageTitle: "البحث",
@@ -375,6 +376,7 @@ export const messages = {
       filterSource: "المصدر",
       searchNoResults: "لا توجد نتائج مطابقة",
       watchOnYouTube: "المشاهدة على يوتيوب",
+      watchAtSource: "المشاهدة على المصدر",
       close: "إغلاق",
     },
     story: {
@@ -394,6 +396,7 @@ export const messages = {
       accountStatusLabel: "حالة الحساب",
       accountStatusAdmin: "مسؤول",
       goToContent: "إدارة المحتوى",
+      userAccountLink: "حسابي كمستخدم عادي",
       forbiddenTitle: "غير مصرَّح بالدخول",
       forbiddenDesc: "هذا الحساب لا يملك صلاحية الوصول إلى لوحة المسؤول.",
 
@@ -562,6 +565,7 @@ export const messages = {
       notifications: "Notifications",
       following: "Following",
       admin: "Admin panel",
+      adminShort: "Admin",
     },
     search: {
       pageTitle: "Search",
@@ -913,6 +917,7 @@ export const messages = {
       filterSource: "Source",
       searchNoResults: "No matching results",
       watchOnYouTube: "Watch on YouTube",
+      watchAtSource: "Watch at the source",
       close: "Close",
     },
     story: {
@@ -932,6 +937,7 @@ export const messages = {
       accountStatusLabel: "Account status",
       accountStatusAdmin: "Admin",
       goToContent: "Content management",
+      userAccountLink: "My regular user account",
       forbiddenTitle: "Access denied",
       forbiddenDesc: "This account doesn't have permission to access the admin panel.",
 

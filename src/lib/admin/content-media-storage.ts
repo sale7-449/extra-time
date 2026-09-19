@@ -34,20 +34,39 @@ async function ensureBucket(supabase: ServiceRoleClient): Promise<void> {
   if (error && !error.message.toLowerCase().includes("already exists")) throw error;
 }
 
-export async function uploadContentMedia(input: {
+export interface ContentMediaUploadTicket {
+  bucket: string;
+  path: string;
+  /** رمز رفع لمرة واحدة ولهذا المسار فقط — يستخدمه المتصفح للرفع المباشر إلى Storage. */
+  token: string;
+  /** الرابط العام النهائي الذي يُحفَظ في الحقل بعد نجاح الرفع. */
+  url: string;
+}
+
+/**
+ * يُصدر "تذكرة رفع" موقَّعة بعد التحقق من المجلد والنوع والحجم — الملف نفسه لا
+ * يمرّ عبر الخادم أبداً. كان الرفع السابق يمرّ عبر Server Action فيفشل صامتاً
+ * لأي ملف يتجاوز 1MB (حدّ Next الافتراضي لجسم الـServer Action؛ وعلى Vercel
+ * 4.5MB كحدّ أقصى للطلب)، أي كل صورة من كاميرا هاتف تقريباً. الآن يرفع المتصفح
+ * مباشرةً إلى Supabase Storage بالتذكرة، والحدّ فقط حدود الـBucket (8MB صورة،
+ * 50MB فيديو).
+ */
+export async function createContentMediaUpload(input: {
   /** مجلد التخزين — id المسودة الحقيقي عند التعديل، أو مفتاح مؤقت آمن
    * (uuid) قبل إنشاء المسودة فعلياً. مُتحقَّق من شكله فقط (لا مسارات عشوائية). */
   folder: string;
   kind: "IMAGE" | "VIDEO";
-  file: File;
-}): Promise<{ url: string } | { error: string }> {
+  fileName: string;
+  contentType: string;
+  size: number;
+}): Promise<ContentMediaUploadTicket | { error: string }> {
   if (!/^[a-zA-Z0-9-]{1,64}$/.test(input.folder)) return { error: "invalid_folder" };
-  if (input.file.size === 0) return { error: "empty_file" };
+  if (!Number.isFinite(input.size) || input.size <= 0) return { error: "empty_file" };
 
   const allowedTypes = input.kind === "IMAGE" ? IMAGE_TYPES : VIDEO_TYPES;
   const maxBytes = input.kind === "IMAGE" ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
-  if (!allowedTypes.includes(input.file.type)) return { error: "invalid_type" };
-  if (input.file.size > maxBytes) return { error: "too_large" };
+  if (!allowedTypes.includes(input.contentType)) return { error: "invalid_type" };
+  if (input.size > maxBytes) return { error: "too_large" };
 
   const supabase = createServiceRoleClient();
   if (!supabase) return { error: "storage_unavailable" };
@@ -59,19 +78,16 @@ export async function uploadContentMedia(input: {
     return { error: "storage_unavailable" };
   }
 
-  const extFromName = input.file.name.split(".").pop()?.toLowerCase();
+  const extFromName = input.fileName.split(".").pop()?.toLowerCase();
   const ext = extFromName && /^[a-z0-9]{2,5}$/.test(extFromName) ? extFromName : input.kind === "IMAGE" ? "jpg" : "mp4";
   const path = `${input.folder}/${randomUUID()}.${ext}`;
 
-  const { error } = await supabase.storage.from(BUCKET).upload(path, input.file, {
-    contentType: input.file.type,
-    upsert: false,
-  });
-  if (error) {
-    console.error("[content-media] upload failed:", error.message);
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(path);
+  if (error || !data) {
+    console.error("[content-media] failed to create signed upload url:", error?.message);
     return { error: "upload_failed" };
   }
 
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-  return { url: data.publicUrl };
+  const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  return { bucket: BUCKET, path, token: data.token, url: publicData.publicUrl };
 }

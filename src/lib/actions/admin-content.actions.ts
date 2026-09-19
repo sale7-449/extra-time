@@ -13,7 +13,7 @@ import { getServerLocale } from "@/lib/i18n/getServerLocale";
 import { COMPETITION_CATALOG } from "@/lib/providers/football/competition-catalog";
 import { canonicalCompetitionId, tagId } from "@/lib/providers/football/ids";
 import { getTeamsByCompetition } from "@/lib/providers/football";
-import { uploadContentMedia } from "@/lib/admin/content-media-storage";
+import { createContentMediaUpload, type ContentMediaUploadTicket } from "@/lib/admin/content-media-storage";
 import { extractOpenGraph, type OpenGraphResult } from "@/lib/admin/open-graph-extractor";
 import { parseHttpUrl } from "@/lib/admin/http-url";
 import type { ContentItem, Attachment } from "@/lib/providers/social/types";
@@ -498,15 +498,18 @@ export async function archiveDraftAction(id: string): Promise<DraftActionResult>
 
 /**
  * رفع صورة/فيديو من جهاز المسؤول إلى Supabase Storage (bucket content-media)
- * — بديل اختياري للرابط الخارجي، لا يُلغيه. نفس حماية Admin المطبَّقة على
- * كل Server Action هنا (requireAdminUsername). `folder` هو id المسودة
- * الحقيقي عند التعديل، أو مفتاح مؤقت آمن يُنشئه العميل قبل إنشاء المسودة.
+ * — بديل اختياري للرابط الخارجي، لا يُلغيه. الـAction لا يستقبل الملف: يتحقّق
+ * من الصلاحية والنوع والحجم فقط ويُصدر تذكرة رفع مباشر للمتصفح (راجع
+ * createContentMediaUpload). `folder` هو id المسودة الحقيقي عند التعديل، أو
+ * مفتاح مؤقت آمن يُنشئه العميل قبل إنشاء المسودة.
  */
-export async function uploadContentMediaAction(input: {
+export async function createContentMediaUploadAction(input: {
   folder: string;
   kind: "IMAGE" | "VIDEO";
-  file: File;
-}): Promise<{ url: string } | { error: string }> {
+  fileName: string;
+  contentType: string;
+  size: number;
+}): Promise<ContentMediaUploadTicket | { error: string }> {
   await requireAdminUsername();
-  return uploadContentMedia(input);
+  return createContentMediaUpload(input);
 }

@@ -79,7 +79,7 @@ export function FollowingView() {
             ))}
             {followedCompetitions.map((comp) => (
               <div key={comp.id} className="flex items-center gap-2 rounded-full border border-border bg-surface ps-3 pe-1 h-9">
-                <CompetitionLogo logoUrl={comp.logoUrl} name={comp.name} size={18} />
+                <CompetitionLogo competitionId={comp.id} logoUrl={comp.logoUrl} name={comp.name} size={26} />
                 <span className="text-sm font-bold">{localizeCompetitionName(comp.name, comp.id, locale)}</span>
                 <FollowButton target={{ kind: "competition", ...comp }} />
               </div>

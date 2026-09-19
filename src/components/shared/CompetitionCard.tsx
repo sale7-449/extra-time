@@ -25,11 +25,8 @@ export function CompetitionCard({ summary }: { summary: CompetitionSummary }) {
         style={{ background: `linear-gradient(155deg, ${competition.colorFrom} 0%, ${competition.colorTo} 100%)` }}
       >
         <div className="absolute inset-0 bg-black/20" />
-        {/* حاوية بيضاء صلبة (لا شفافية) — شعارات البطولات غالباً حبر داكن مصمَّم
-            لخلفية فاتحة؛ خلفية شبه شفافة كانت تُظهر تدرّج البطاقة الداكن من
-            خلفها فيبتلع الشعار. حل عام يعمل لأي لون شعار، لا مخصَّص لبطولة. */}
-        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white shadow-sm [&_svg]:w-5 [&_svg]:h-5 overflow-hidden">
-          <CompetitionLogo logoUrl={competition.logoUrl} name={competition.name} size={28} />
+        <div className="relative">
+          <CompetitionLogo competitionId={competition.id} logoUrl={competition.logoUrl} name={competition.name} size={44} />
         </div>
         <div className="relative min-w-0">
           <p className="text-[11px] font-bold text-white/70">{competition.country}</p>

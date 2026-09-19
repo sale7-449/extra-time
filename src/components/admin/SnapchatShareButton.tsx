@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { generateStoryImage, STORY_WIDTH, STORY_HEIGHT } from "@/lib/story";
-import { detectPreviewKind } from "@/components/admin/MediaUploadField";
+import { detectPreviewKind } from "@/lib/media-kind";
 import { Button } from "@/components/ui/Button";
 import { CloseIcon } from "@/components/icons";
 import type { ContentItem } from "@/lib/providers/social/types";

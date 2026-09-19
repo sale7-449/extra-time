@@ -4,45 +4,9 @@ import { useRef, useState } from "react";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { uploadContentMediaAction } from "@/lib/actions/admin-content.actions";
-
-/** معرّف فيديو يوتيوب من أي صيغة رابط شائعة — نسخة عميل بسيطة مطابقة لمنطق
- * extractYouTubeId في admin-content.actions.ts (غير قابلة للاستيراد من هناك:
- * ملف "use server" لا يُصدِّر إلا Server Actions غير متزامنة). */
-export function extractYouTubeVideoId(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.replace(/^www\.|^m\./, "");
-    if (host === "youtu.be") return u.pathname.slice(1).split("/")[0] || null;
-    if (host === "youtube.com") {
-      const v = u.searchParams.get("v");
-      if (v) return v;
-      const m = u.pathname.match(/^\/(shorts|embed)\/([^/?]+)/);
-      if (m) return m[2];
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export type PreviewKind = "IMAGE" | "YOUTUBE" | "VIDEO_FILE" | "LINK";
-
-/** يُحدَّد نوع المعاينة من شكل القيمة الفعلية نفسها، لا من "kind" الحقل
- * المُعلَن — رابط يوتيوب داخل حقل "صورة" يجب ألا يُعرَض أبداً داخل <img>،
- * تماماً كالعكس. blob:/data: تأتي حصراً من رفع محلي نتحكّم بنوعه فعلياً،
- * فتُصنَّف حسب kind الحقل مباشرة (موثوقة، لا تخمين). */
-export function detectPreviewKind(value: string, fieldKind: "IMAGE" | "VIDEO"): PreviewKind {
-  if (value.startsWith("blob:") || value.startsWith("data:")) return fieldKind === "IMAGE" ? "IMAGE" : "VIDEO_FILE";
-  if (extractYouTubeVideoId(value)) return "YOUTUBE";
-  if (/\.(mp4|webm|mov|m4v|ogg|ogv)(\?|#|$)/i.test(value)) return "VIDEO_FILE";
-  if (/\.(jpe?g|png|webp|gif|avif|svg)(\?|#|$)/i.test(value)) return "IMAGE";
-  // امتداد غير معروف: حقل صورة يبقى صورة افتراضياً (شعارات حقيقية كثيرة في
-  // هذا المشروع بلا امتداد ظاهر في الرابط) — لكن حقل فيديو بقيمة غير
-  // مؤكَّدة التشغيل يُعرَض كبطاقة رابط، فمشغّل <video> مكسور صامت أسوأ من
-  // بطاقة رابط صادقة.
-  return fieldKind === "IMAGE" ? "IMAGE" : "LINK";
-}
+import { createContentMediaUploadAction } from "@/lib/actions/admin-content.actions";
+import { createClient } from "@/lib/supabase/client";
+import { detectPreviewKind, extractYouTubeVideoId } from "@/lib/media-kind";
 
 /**
  * حقل صورة/فيديو مزدوج المصدر — رابط خارجي (نص يدوي كما كان دائماً) أو رفع
@@ -78,18 +42,37 @@ export function MediaUploadField({
     setLocalPreview(objectUrl);
     setUploading(true);
     try {
-      const result = await uploadContentMediaAction({ folder, kind, file });
-      if ("error" in result) {
+      // 1) تذكرة رفع صغيرة من الخادم (صلاحية + نوع + حجم)، 2) رفع الملف نفسه مباشرة
+      // من المتصفح إلى Storage — لا جسم كبير عبر Server Action (كان يفشل صامتاً >1MB).
+      const ticket = await createContentMediaUploadAction({
+        folder,
+        kind,
+        fileName: file.name,
+        contentType: file.type,
+        size: file.size,
+      });
+      if ("error" in ticket) {
         setError(
-          result.error === "too_large"
+          ticket.error === "too_large"
             ? t.admin.uploadTooLarge
-            : result.error === "invalid_type"
+            : ticket.error === "invalid_type"
               ? t.admin.uploadInvalidType
               : t.admin.uploadFailed
         );
         return;
       }
-      onChange(result.url);
+
+      const supabase = createClient();
+      if (!supabase) return setError(t.admin.uploadFailed);
+      const { error: uploadError } = await supabase.storage
+        .from(ticket.bucket)
+        .uploadToSignedUrl(ticket.path, ticket.token, file, { contentType: file.type });
+      if (uploadError) return setError(t.admin.uploadFailed);
+
+      onChange(ticket.url);
+    } catch {
+      // أي فشل (شبكة، خطأ خادم) يجب أن يظهر للمستخدم — لا صمت.
+      setError(t.admin.uploadFailed);
     } finally {
       setUploading(false);
     }
@@ -146,7 +129,7 @@ export function MediaUploadField({
       )}
 
       {previewSrc && previewKind === "VIDEO_FILE" && (
-        <video src={previewSrc} controls className="mt-2 h-28 w-auto rounded-[var(--radius-sm)] border border-border" />
+        <video src={previewSrc} controls playsInline preload="metadata" className="mt-2 h-28 w-auto rounded-[var(--radius-sm)] border border-border" />
       )}
 
       {previewSrc && previewKind === "LINK" && (

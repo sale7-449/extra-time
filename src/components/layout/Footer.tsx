@@ -6,7 +6,7 @@ import { useLocale } from "@/lib/i18n/LocaleProvider";
 
 /** `year` يُحسَب على الخادم ويصل كـprop مُسلسَل، فيتطابق رسم العميل مع الخادم
  * حتى عند تخطّي منتصف ليلة رأس السنة بين الرسمين. */
-export function Footer({ year }: { year: number }) {
+export function Footer({ year, isAdmin = false }: { year: number; isAdmin?: boolean }) {
   const { t } = useLocale();
 
   return (
@@ -22,6 +22,7 @@ export function Footer({ year }: { year: number }) {
           <Link href="/videos" className="hover:text-ink transition-colors">{t.nav.videos}</Link>
           <Link href="/competitions" className="hover:text-ink transition-colors">{t.nav.competitions}</Link>
           <Link href="/stats" className="hover:text-ink transition-colors">{t.nav.stats}</Link>
+          {isAdmin && <Link href="/profile" className="hover:text-ink transition-colors">{t.nav.profile}</Link>}
         </nav>
         <p className="text-xs text-muted-dim">© {year} Extra Time</p>
       </div>

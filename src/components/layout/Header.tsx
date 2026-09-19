@@ -27,29 +27,35 @@ export function Header({ isAdmin = false }: { isAdmin?: boolean }) {
 
         <div className="flex items-center gap-1.5">
           <LanguageSwitcher />
-          {isAdmin && (
-            <Link
-              href="/admin"
-              aria-label={t.nav.admin}
-              title={t.nav.admin}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors [&_svg]:w-5 [&_svg]:h-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-            >
-              <ShieldIcon />
-            </Link>
-          )}
           <Link href="/search" aria-label={t.nav.search} className={iconButton}>
             <SearchIcon />
           </Link>
           <button aria-label={t.nav.notifications} className={`hidden sm:flex ${iconButton}`}>
             <BellIcon />
           </button>
-          <Link
-            href="/profile"
-            aria-label={t.nav.profile}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-surface border border-border text-muted hover:text-primary hover:border-primary/40 transition-colors [&_svg]:w-5 [&_svg]:h-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-          >
-            <UserIcon />
-          </Link>
+          {/* خانة الحساب: جلسة Admin فعّالة تحلّ محلّ زر الحساب/الدخول بزر Admin
+              واضح ونصّي (وليس دائرة أيقونة) يذهب إلى /admin. جلسة Admin مستقلة عن
+              جلسة المستخدم العادي: حساب المستخدم يبقى متاحاً من قائمة «المزيد»
+              على الجوال وتذييل الموقع وصفحة لوحة المسؤول، ولا يتأثر دخوله. */}
+          {isAdmin ? (
+            <Link
+              href="/admin"
+              aria-label={t.nav.admin}
+              title={t.nav.admin}
+              className="inline-flex h-10 items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-extrabold text-primary hover:bg-primary/20 transition-colors [&_svg]:w-4 [&_svg]:h-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              <ShieldIcon />
+              {t.nav.adminShort}
+            </Link>
+          ) : (
+            <Link
+              href="/profile"
+              aria-label={t.nav.profile}
+              className="w-10 h-10 flex items-center justify-center rounded-full bg-surface border border-border text-muted hover:text-primary hover:border-primary/40 transition-colors [&_svg]:w-5 [&_svg]:h-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              <UserIcon />
+            </Link>
+          )}
         </div>
       </div>
     </header>

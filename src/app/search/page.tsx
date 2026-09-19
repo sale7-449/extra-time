@@ -112,7 +112,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                     className="flex items-center gap-3 rounded-[var(--radius-md)] border border-border bg-surface px-4 py-3"
                   >
                     <Link href={`/competitions/${c.id}`} className="flex flex-1 min-w-0 items-center gap-3 hover:text-primary transition-colors">
-                      <CompetitionLogo logoUrl={c.logoUrl} name={c.name} size={28} />
+                      <CompetitionLogo competitionId={c.id} logoUrl={c.logoUrl} name={c.name} size={32} />
                       <span className="font-bold text-sm truncate">{c.name}</span>
                     </Link>
                     <FollowButton target={{ kind: "competition", id: c.id, name: c.name, logoUrl: c.logoUrl }} />

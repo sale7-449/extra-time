@@ -51,7 +51,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <FollowProvider>
             <Header isAdmin={isAdmin} />
             <main className="flex-1 pb-20 md:pb-0">{children}</main>
-            <Footer year={year} />
+            <Footer year={year} isAdmin={isAdmin} />
             <MobileNav isAdmin={isAdmin} />
           </FollowProvider>
         </LocaleProvider>

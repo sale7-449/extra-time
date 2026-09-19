@@ -50,12 +50,7 @@ export default async function CompetitionPage({ params }: { params: Promise<{ id
       >
         <div className="container-page flex items-start justify-between gap-4">
           <div className="flex items-center gap-4">
-            {/* خلفية بيضاء صلبة — نفس منطق CompetitionCard، شعارات كثيرة (مثل
-                البريميرليج ودوري الأبطال) حبر داكن يختفي على خلفية شبه شفافة
-                فوق تدرّج داكن. */}
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white shadow-sm overflow-hidden [&_svg]:w-6 [&_svg]:h-6">
-              <CompetitionLogo logoUrl={competition.logoUrl} name={competition.name} size={40} />
-            </div>
+            <CompetitionLogo competitionId={competition.id} logoUrl={competition.logoUrl} name={competition.name} size={56} />
             <div>
               <span className="text-sm font-bold text-white/70">{competition.country}</span>
               <h1 className="text-3xl font-extrabold text-white mt-1">{competition.name}</h1>

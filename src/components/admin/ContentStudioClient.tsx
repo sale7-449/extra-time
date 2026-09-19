@@ -106,6 +106,16 @@ function useKindLabel() {
   };
 }
 
+/** معرّف مجلد رفع مؤقت. crypto.randomUUID غير متاح في متصفحات أقدم (Safari <15.4) ولا
+ * في سياق غير آمن، واستدعاؤه أثناء أول رسم كان سيُسقط المكوّن كاملاً (فتبقى كل
+ * الأزرار ميتة) — لذلك احتياطي عبر getRandomValues بنفس الشكل المقبول خادمياً. */
+function newUploadFolderId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 const textareaClass =
   "w-full rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3.5 py-2.5 text-sm text-ink placeholder:text-muted-dim outline-none transition-colors focus:border-primary/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary";
 
@@ -150,7 +160,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
   // مجلد رفع مؤقت وآمن لملفات تُرفَع أثناء الإنشاء (قبل وجود id مسودة حقيقي
   // بعد) — نفس شكل مسار content-media/<draft-id>/<اسم> تماماً، فقط بمفتاح
   // مؤقت بدل id نهائي غير موجود بعد.
-  const [uploadFolder] = useState(() => crypto.randomUUID());
+  const [uploadFolder] = useState(newUploadFolderId);
 
   // اختيار الموضوع
   const [subject, setSubject] = useState<SubjectType | null>(null);
@@ -244,6 +254,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       setMatchGroupsLoading(true);
       try {
         setMatchGroups(await listMatchGroupsAction());
+      } catch {
+        setCreateError(t.admin.genericError);
       } finally {
         setMatchGroupsLoading(false);
       }
@@ -252,6 +264,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       setTeamGroupsLoading(true);
       try {
         setTeamGroups(await listTeamsByCompetitionAction());
+      } catch {
+        setCreateError(t.admin.genericError);
       } finally {
         setTeamGroupsLoading(false);
       }
@@ -272,6 +286,10 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
           base = live;
           setLiveSubjectBase(live);
         }
+      } catch {
+        // تعذّر جلب البيانات الحيّة (مصدر المباريات) — نفتح المسودة بما هو محفوظ
+        // بدل ألّا تُفتح إطلاقاً، مع تنبيه صريح.
+        setEditError(t.admin.genericError);
       } finally {
         setLiveSubjectLoading(false);
       }
@@ -345,6 +363,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       if (data.description) setManualSummary(data.description);
       if (data.imageUrl) setManualImage(data.imageUrl);
       setExtractMessage(data.warnings.length > 0 ? t.admin.ogPartialData : t.admin.ogSuccess);
+    } catch {
+      setExtractMessage(t.admin.ogFetchFailed);
     } finally {
       setExtractLoading(false);
     }
@@ -368,6 +388,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
           destinations: createDestinations,
         })
       );
+    } catch {
+      setCreateError(t.admin.genericError);
     } finally {
       setCreateLoading(false);
     }
@@ -379,6 +401,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     setMatchSearching(true);
     try {
       setMatchSearchResults(await searchMatchesAction(matchQuery));
+    } catch {
+      setCreateError(t.admin.genericError);
     } finally {
       setMatchSearching(false);
     }
@@ -391,6 +415,9 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     try {
       const detail = await getMatchDetailAction(m.id);
       setSelectedMatch(detail ?? m);
+    } catch {
+      // تفاصيل المباراة (الأحداث) تعذّرت — نفتح المباراة بما لدينا من القائمة.
+      setSelectedMatch(m);
     } finally {
       setMatchDetailLoading(false);
     }
@@ -421,6 +448,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
           destinations: createDestinations,
         })
       );
+    } catch {
+      setCreateError(t.admin.genericError);
     } finally {
       setCreateLoading(false);
     }
@@ -443,6 +472,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       });
       if ("error" in result) return setEditError(errorMessage(result.error));
       upsertDraft(result.draft);
+    } catch {
+      setEditError(t.admin.genericError);
     } finally {
       setEditLoading(null);
     }
@@ -456,6 +487,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       const result = await publishDraftAction(activeDraft.id);
       if ("error" in result) return setEditError(t.admin.genericError);
       upsertDraft(result.draft);
+    } catch {
+      setEditError(t.admin.genericError);
     } finally {
       setEditLoading(null);
     }
@@ -470,6 +503,8 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
       if ("error" in result) return setEditError(t.admin.genericError);
       setDrafts((prev) => prev.filter((d) => d.id !== activeDraft.id));
       setActiveDraftId(null);
+    } catch {
+      setEditError(t.admin.genericError);
     } finally {
       setEditLoading(null);
     }

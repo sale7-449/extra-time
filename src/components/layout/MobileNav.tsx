@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HomeIcon, MatchesIcon, NewsIcon, TrophyIcon, UserIcon, MoreIcon } from "@/components/icons";
+import { HomeIcon, MatchesIcon, NewsIcon, TrophyIcon, UserIcon, MoreIcon, ShieldIcon } from "@/components/icons";
 import { cx } from "@/lib/utils";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { Modal } from "@/components/ui/Modal";
@@ -13,12 +13,16 @@ export function MobileNav({ isAdmin = false }: { isAdmin?: boolean }) {
   const { t } = useLocale();
   const [moreOpen, setMoreOpen] = useState(false);
 
+  // جلسة Admin فعّالة: تبويب الحساب الأخير يصبح «المسؤول» (→ /admin)، وحساب
+  // المستخدم العادي ينتقل إلى قائمة «المزيد» فلا يفقده أحد ولا يتأثر دخوله.
   const items = [
     { href: "/", label: t.nav.home, Icon: HomeIcon },
     { href: "/matches", label: t.nav.matches, Icon: MatchesIcon },
     { href: "/news", label: t.nav.news, Icon: NewsIcon },
     { href: "/competitions", label: t.nav.competitions, Icon: TrophyIcon },
-    { href: "/profile", label: t.nav.profile, Icon: UserIcon },
+    isAdmin
+      ? { href: "/admin", label: t.nav.adminShort, Icon: ShieldIcon }
+      : { href: "/profile", label: t.nav.profile, Icon: UserIcon },
   ];
 
   const moreItems = [
@@ -27,7 +31,7 @@ export function MobileNav({ isAdmin = false }: { isAdmin?: boolean }) {
     { href: "/videos", label: t.nav.videos },
     { href: "/transfers", label: t.nav.transfers },
     { href: "/stats", label: t.nav.stats },
-    ...(isAdmin ? [{ href: "/admin", label: t.nav.admin }] : []),
+    ...(isAdmin ? [{ href: "/profile", label: t.nav.profile }] : []),
   ];
 
   const isMoreActive = moreItems.some((item) => pathname.startsWith(item.href));

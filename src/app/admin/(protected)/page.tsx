@@ -38,6 +38,15 @@ export default async function AdminPage() {
           {t.admin.goToContent}
         </Link>
 
+        {/* جلسة Admin مستقلة عن حساب المستخدم العادي: الدخول/الخروج من أحدهما لا
+            يمسّ الآخر. */}
+        <Link
+          href="/profile"
+          className="flex h-11 w-full items-center justify-center rounded-[var(--radius-sm)] border border-border text-sm font-bold text-muted hover:text-ink hover:border-primary/40 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        >
+          {t.admin.userAccountLink}
+        </Link>
+
         <form action={adminLogoutAction}>
           <button
             type="submit"
