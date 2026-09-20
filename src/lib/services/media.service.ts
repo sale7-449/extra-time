@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { mediaProvider, youtubeSearchProvider } from "@/lib/providers/media";
 import { findMatchMedia, type MatchedMedia } from "@/lib/providers/media/match-media-matcher";
 import { COMPETITION_NAME_HINTS } from "@/lib/providers/media/competition-hints";
@@ -95,9 +96,21 @@ function dedupeMedia(items: MediaItem[]): MediaItem[] {
 
 /** [] بهدوء عند تعطيل المزوّد (VIDEO_PROVIDER_ENABLED=false) أو غياب أي
  * محتوى حقيقي — الواجهة تعرض حالة فارغة صريحة، لا Mock إطلاقاً. */
+/** آخر مجمّع فيديو ناجح فعلياً (Next Data Cache، stale-while-revalidate): موجز
+ * يوتيوب العام يتعطّل أحياناً كلياً (رُصد فعلياً: 404 لكل القنوات، حتى قنوات
+ * Google نفسها) فتفشل كل الجولات وتصبح الصفحة فارغة رغم أن آخر فيديوهات حقيقية
+ * جُلبت قبل دقائق. الكاش يُبقي آخر نتيجة حقيقية صالحة ويُجدّدها في الخلفية؛ فشل
+ * التجديد لا يمحوها. لا يُخزَّن أي فشل (الخطأ يُرمى ولا يدخل الكاش)، ولا بيانات
+ * مُختلَقة أبداً — فقط آخر ما جلبه المصدر الحقيقي. */
+const getCachedProviderPool = unstable_cache(
+  async () => (mediaProvider ? mediaProvider.getLatestMedia(POOL_SIZE) : []),
+  ["media", "pool"],
+  { revalidate: 900 }
+);
+
 export async function getMediaPool(locale: Locale = "ar"): Promise<MediaItem[]> {
   if (!mediaProvider) return [];
-  const pool = await mediaProvider.getLatestMedia(POOL_SIZE);
+  const pool = await getCachedProviderPool();
   return dedupeMedia(sortMedia(pool, locale));
 }
 

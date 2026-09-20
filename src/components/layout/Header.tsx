@@ -15,7 +15,7 @@ export function Header({ isAdmin = false }: { isAdmin?: boolean }) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-bg/85 backdrop-blur-md">
-      <div className="container-page flex h-16 items-center justify-between gap-3">
+      <div className="container-page flex h-16 items-center justify-between gap-2 sm:gap-3">
         <Link
           href="/"
           className="shrink-0 rounded-[var(--radius-sm)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -25,7 +25,7 @@ export function Header({ isAdmin = false }: { isAdmin?: boolean }) {
 
         <DesktopNav />
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5">
           <LanguageSwitcher />
           <Link href="/search" aria-label={t.nav.search} className={iconButton}>
             <SearchIcon />
@@ -42,10 +42,14 @@ export function Header({ isAdmin = false }: { isAdmin?: boolean }) {
               href="/admin"
               aria-label={t.nav.admin}
               title={t.nav.admin}
-              className="inline-flex h-10 items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-extrabold text-primary hover:bg-primary/20 transition-colors [&_svg]:w-4 [&_svg]:h-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              className="inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-[var(--radius-sm)] border border-primary/40 bg-primary/10 px-2 min-[375px]:rounded-full min-[375px]:px-3 text-xs font-extrabold text-primary hover:bg-primary/20 transition-colors [&_svg]:w-4 [&_svg]:h-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
             >
               <ShieldIcon />
-              {t.nav.adminShort}
+              {/* عرض الهيدر على الشاشات الضيقة (≤360px، وهو عرض أغلب أجهزة Android) لا
+                  يتّسع للنص — كان الزر بنصّه يُخرج الصفحة كلها أفقياً عن الشاشة
+                  (5px عند 360 و45px عند 320). النص يظهر من 375px؛ الأيقونة وحدها
+                  تكفي دونها (التبويب المسمّى «المسؤول» في MobileNav يبقى دائماً). */}
+              <span className="hidden min-[375px]:inline">{t.nav.adminShort}</span>
             </Link>
           ) : (
             <Link

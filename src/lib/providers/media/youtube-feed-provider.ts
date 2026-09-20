@@ -22,52 +22,64 @@ export interface YouTubeChannelConfig {
 export class YouTubeFeedProvider implements MediaProvider {
   constructor(private readonly channels: YouTubeChannelConfig[]) {}
 
-  private async fetchChannel(channel: YouTubeChannelConfig): Promise<MediaItem[]> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+  /** موجز يوتيوب العام يُرجع أحياناً 404/500 عابرة لقناة سليمة (رُصد فعلياً:
+   * 500 ثم 404 لنفس القناة في طلبين متتاليين) — محاولة ثانية واحدة بعد مهلة قصيرة
+   * قبل اعتبار القناة فاشلة. عطل كامل مستمر يبقى فشلاً حقيقياً (لا نخفيه). */
+  private async fetchFeedXml(channel: YouTubeChannelConfig): Promise<string> {
+    const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${channel.channelId}`;
+    let lastStatus = 0;
 
-    try {
-      const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${channel.channelId}`;
-      const response = await fetch(url, {
-        signal: controller.signal,
-        next: { revalidate: 3600 }, // ساعة — فيديوهات لا تتغيّر بوتيرة الأخبار
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; ExtraTimeBot/1.0)" },
-      });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 400));
 
-      if (!response.ok) {
-        throw new YouTubeFeedError(`YouTube feed fetch failed: ${response.status} — ${channel.channelId}`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          next: { revalidate: 3600 }, // ساعة — فيديوهات لا تتغيّر بوتيرة الأخبار
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; ExtraTimeBot/1.0)" },
+        });
+        if (response.ok) return await response.text();
+        lastStatus = response.status;
+      } catch {
+        lastStatus = 0;
+      } finally {
+        clearTimeout(timeout);
       }
-
-      const xml = await response.text();
-      const entries = parseYouTubeFeed(xml);
-
-      return entries.map((entry) => {
-        const category = classifyMedia(entry.title, entry.description, channel.kind);
-        const language = detectLanguage(`${entry.title} ${entry.description}`);
-        return {
-          id: `yt-${entry.videoId}`,
-          title: entry.title,
-          description: entry.description || undefined,
-          thumbnailUrl: entry.thumbnailUrl,
-          source: channel.source,
-          sourceUrl: entry.watchUrl,
-          embedUrl: `https://www.youtube.com/embed/${entry.videoId}`,
-          publishedAt: entry.publishedAt ?? new Date().toISOString(),
-          language,
-          category,
-          relatedName: channel.relatedName,
-          // قنوات رسمية للأندية/البطولات تسمح بالتضمين افتراضياً؛ إن مُنع
-          // لاحقاً لفيديو بعينه يعرض iframe يوتيوب نفسه بديلاً داخلياً بلا
-          // كسر الصفحة — لا حاجة لتأكيد مسبق غير متاح بلا Data API.
-          isEmbeddable: true,
-          // كل قنوات هذا المزوّد معتمَدة يدوياً (راجع index.ts) — إشارة ثقة
-          // حقيقية لـmatch-media-matcher، لا افتراض عشوائي.
-          isOfficialSource: true,
-        } satisfies MediaItem;
-      });
-    } finally {
-      clearTimeout(timeout);
     }
+
+    throw new YouTubeFeedError(`YouTube feed fetch failed: ${lastStatus} — ${channel.channelId}`);
+  }
+
+  private async fetchChannel(channel: YouTubeChannelConfig): Promise<MediaItem[]> {
+    const xml = await this.fetchFeedXml(channel);
+    const entries = parseYouTubeFeed(xml);
+
+    return entries.map((entry) => {
+      const category = classifyMedia(entry.title, entry.description, channel.kind);
+      const language = detectLanguage(`${entry.title} ${entry.description}`);
+      return {
+        id: `yt-${entry.videoId}`,
+        title: entry.title,
+        description: entry.description || undefined,
+        thumbnailUrl: entry.thumbnailUrl,
+        source: channel.source,
+        sourceUrl: entry.watchUrl,
+        embedUrl: `https://www.youtube.com/embed/${entry.videoId}`,
+        publishedAt: entry.publishedAt ?? new Date().toISOString(),
+        language,
+        category,
+        relatedName: channel.relatedName,
+        // قنوات رسمية للأندية/البطولات تسمح بالتضمين افتراضياً؛ إن مُنع
+        // لاحقاً لفيديو بعينه يعرض iframe يوتيوب نفسه بديلاً داخلياً بلا
+        // كسر الصفحة — لا حاجة لتأكيد مسبق غير متاح بلا Data API.
+        isEmbeddable: true,
+        // كل قنوات هذا المزوّد معتمَدة يدوياً (راجع index.ts) — إشارة ثقة
+        // حقيقية لـmatch-media-matcher، لا افتراض عشوائي.
+        isOfficialSource: true,
+      } satisfies MediaItem;
+    });
   }
 
   async getLatestMedia(limit: number): Promise<MediaItem[]> {

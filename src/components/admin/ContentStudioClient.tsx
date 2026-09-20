@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocale } from "@/lib/i18n/LocaleProvider";
 import { cx, formatKickoffTime } from "@/lib/utils";
 import { localizeCompetitionShortName } from "@/lib/i18n/localized-names";
@@ -272,8 +272,23 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
     }
   }
 
+  // على الجوال (عمود واحد) تُفتح لوحة المراجعة أسفل قائمة المسودات وشبكة "محتوى جديد"
+  // — أي خارج الشاشة (رُصد فعلياً: 832px تحت الحافة العليا لشاشة 664px بلا تمرير)،
+  // فيبدو الضغط على المسودة بلا أي أثر. كل فتح/إنشاء مسودة يرفع هذا العدّاد ليُمرَّر
+  // إلى اللوحة تلقائياً (حتى لو كانت نفس المسودة المفتوحة).
+  const reviewPanelRef = useRef<HTMLDivElement>(null);
+  const [panelScrollTick, setPanelScrollTick] = useState(0);
+  useEffect(() => {
+    if (panelScrollTick === 0) return;
+    const el = reviewPanelRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    if (top > window.innerHeight * 0.5 || top < 0) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [panelScrollTick]);
+
   async function selectDraft(draft: ContentDraft) {
     setActiveDraftId(draft.id);
+    setPanelScrollTick((n) => n + 1);
     setEditError(null);
     setLiveSubjectBase(null);
 
@@ -997,7 +1012,7 @@ export function ContentStudioClient({ initialDrafts }: { initialDrafts: ContentD
 
         {/* المراجعة والتعديل */}
         {activeDraft && previewItem ? (
-          <div className="border-t border-border pt-8">
+          <div ref={reviewPanelRef} className="border-t border-border pt-8 scroll-mt-20">
             <div className="flex items-center gap-3 mb-1">
               <h2 className="text-lg font-extrabold">{t.admin.editTitle}</h2>
               <Badge tone="primary">{kindLabel(activeDraft.kind)}</Badge>

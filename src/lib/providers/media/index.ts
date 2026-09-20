@@ -47,6 +47,13 @@ export const isUsingRealMediaData = mediaProvider !== null;
 // مقيَّد بقناة رسمية معروفة) بلا الحاجة لاستيراد الشكل الكامل لـCHANNELS.
 export const officialChannelIds: string[] = CHANNELS.map((c) => c.channelId);
 
+/** القنوات الرسمية المعتمدة نفسها كروابط مباشرة على يوتيوب — تُعرَض في صفحة
+ * /videos كبديل حقيقي حين يتعذّر موجز يوتيوب (Atom) مؤقتاً، بدل صفحة فارغة. */
+export const officialChannels: Array<{ name: string; url: string }> = CHANNELS.map((c) => ({
+  name: c.source,
+  url: `https://www.youtube.com/channel/${c.channelId}`,
+}));
+
 /**
  * محوّل بحث اختياري (YouTube Data API v3) — يُفعَّل فقط عند توفّر
  * YOUTUBE_DATA_API_KEY (لا نطلبه، لا نفترض وجوده، لا تكلفة أو تعطّل بدونه).
